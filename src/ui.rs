@@ -7,15 +7,14 @@ use std::{
 };
 
 use arboard::Clipboard;
-use eframe::{App, Frame};
+use eframe::egui::epaint::Shadow;
+use eframe::egui::viewport::ResizeDirection;
 use eframe::egui::{
     self, Align, Align2, Area, Button, CentralPanel, Color32, ComboBox, Context, CursorIcon,
     FontData, FontDefinitions, FontFamily, Frame as UiFrame, Id, Layout, Margin, Order, Rect,
     RichText, Rounding, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2, ViewportCommand,
 };
-use eframe::egui::epaint::Shadow;
-use eframe::egui::viewport::ResizeDirection;
-use rfd::FileDialog;
+use eframe::{App, Frame};
 use tracing::error;
 
 use crate::{
@@ -23,7 +22,7 @@ use crate::{
         AnalysisOutcome, AppError, ImageSourceKind, ModelDescriptor, ParseStatus, ValidationIssue,
     },
     i18n::{self, Language, TextKey},
-    services::{build_analysis_request, ConfigStore, ImagePipelineService, VisionClient},
+    services::{ConfigStore, ImagePipelineService, VisionClient, build_analysis_request},
     state::{AppState, ModelCatalogState, RequestPhase, ToastTone},
 };
 
@@ -49,10 +48,15 @@ const WINDOW_RADIUS: f32 = 26.0;
 const CARD_RADIUS: f32 = 22.0;
 const CONTROL_RADIUS: f32 = 16.0;
 const TITLE_BAR_HEIGHT: f32 = 72.0;
-const FOOTER_HEIGHT: f32 = 42.0;
+const FOOTER_HEIGHT: f32 = 48.0;
 const COLUMN_GAP: f32 = 14.0;
 const RESIZE_HANDLE: f32 = 8.0;
 const RESIZE_CORNER: f32 = 22.0;
+const LEFT_COLUMN_OFFSET: f32 = 8.0;
+const CONTROL_HEIGHT: f32 = 40.0;
+const MODEL_HINT_HEIGHT: f32 = 20.0;
+const REQUEST_FEEDBACK_HEIGHT: f32 = 88.0;
+const WINDOW_CONTENT_INSET: f32 = 1.0;
 
 struct ModelCatalogMessage {
     identity: String,
@@ -236,7 +240,11 @@ impl RgmrApp {
                 self.state.set_image(asset);
                 self.state.push_toast(
                     ToastTone::Success,
-                    format!("{}{}", self.text(TextKey::ToastImageLoadedPrefix), source_label),
+                    format!(
+                        "{}{}",
+                        self.text(TextKey::ToastImageLoadedPrefix),
+                        source_label
+                    ),
                 );
             }
             Err(err) => {
@@ -244,15 +252,6 @@ impl RgmrApp {
                 self.state.set_error(err);
                 self.state.push_toast(ToastTone::Danger, message);
             }
-        }
-    }
-
-    fn pick_image_file(&mut self) {
-        if let Some(path) = FileDialog::new()
-            .add_filter("image", &["png", "jpg", "jpeg", "gif", "bmp", "webp", "ico"])
-            .pick_file()
-        {
-            self.load_image_from_path(path, ImageSourceKind::FilePicker);
         }
     }
 
@@ -288,8 +287,10 @@ impl RgmrApp {
 
         self.state.request_phase = RequestPhase::Preparing;
         self.state.clear_error();
-        self.state
-            .push_toast(ToastTone::Accent, self.text(TextKey::ToastRequestSubmitting));
+        self.state.push_toast(
+            ToastTone::Accent,
+            self.text(TextKey::ToastRequestSubmitting),
+        );
 
         thread::spawn(move || {
             let result = (|| {
@@ -374,9 +375,7 @@ impl RgmrApp {
                     self.state.save_error(err);
                 }
             },
-            None => self
-                .state
-                .save_error(AppError::ConfigDirectoryUnavailable),
+            None => self.state.save_error(AppError::ConfigDirectoryUnavailable),
         }
     }
 
@@ -414,8 +413,10 @@ impl RgmrApp {
             && previous_identity != self.state.config.api.catalog_identity()
         {
             self.state.mark_model_catalog_stale();
-            self.state
-                .push_toast(ToastTone::Warning, self.text(TextKey::ToastModelCatalogStale));
+            self.state.push_toast(
+                ToastTone::Warning,
+                self.text(TextKey::ToastModelCatalogStale),
+            );
         }
     }
 
@@ -429,12 +430,14 @@ impl RgmrApp {
                     .stroke(Stroke::new(1.0, BORDER))
                     .rounding(window_rounding())
                     .shadow(window_shadow())
-                    .inner_margin(Margin::same(0.0))
+                    .inner_margin(Margin::same(WINDOW_CONTENT_INSET))
                     .outer_margin(Margin::same(WINDOW_MARGIN))
                     .show(ui, |ui| {
                         ui.set_min_size(egui::vec2(
-                            (available.x - WINDOW_MARGIN * 2.0).max(0.0),
-                            (available.y - WINDOW_MARGIN * 2.0).max(0.0),
+                            (available.x - WINDOW_MARGIN * 2.0 - WINDOW_CONTENT_INSET * 2.0)
+                                .max(0.0),
+                            (available.y - WINDOW_MARGIN * 2.0 - WINDOW_CONTENT_INSET * 2.0)
+                                .max(0.0),
                         ));
 
                         self.render_title_bar(ui, ctx);
@@ -522,24 +525,25 @@ impl RgmrApp {
                                 ),
                             );
 
-                            ui.allocate_ui_at_rect(drag_rect.shrink2(egui::vec2(14.0, 10.0)), |ui| {
-                                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                    status_badge(
-                                        ui,
-                                        i18n::request_phase_label(
-                                            self.lang(),
-                                            &self.state.request_phase,
-                                        ),
-                                        request_phase_color(&self.state.request_phase),
-                                    );
-                                    ui.add_space(8.0);
-                                    ui.label(
-                                        RichText::new(summary)
-                                            .size(11.8)
-                                            .color(TEXT_SECONDARY),
-                                    );
-                                });
-                            });
+                            ui.allocate_ui_at_rect(
+                                drag_rect.shrink2(egui::vec2(14.0, 10.0)),
+                                |ui| {
+                                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                        status_badge(
+                                            ui,
+                                            i18n::request_phase_label(
+                                                self.lang(),
+                                                &self.state.request_phase,
+                                            ),
+                                            request_phase_color(&self.state.request_phase),
+                                        );
+                                        ui.add_space(8.0);
+                                        ui.label(
+                                            RichText::new(summary).size(11.8).color(TEXT_SECONDARY),
+                                        );
+                                    });
+                                },
+                            );
 
                             if drag_response.hovered() {
                                 ctx.set_cursor_icon(CursorIcon::Grab);
@@ -553,10 +557,7 @@ impl RgmrApp {
 
                             ui.add_space(10.0);
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui
-                                    .add(titlebar_button("×", ERROR, true))
-                                    .clicked()
-                                {
+                                if ui.add(titlebar_button("×", ERROR, true)).clicked() {
                                     ctx.send_viewport_cmd(ViewportCommand::Close);
                                 }
                                 if ui
@@ -569,10 +570,7 @@ impl RgmrApp {
                                 {
                                     ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
                                 }
-                                if ui
-                                    .add(titlebar_button("—", TEXT_PRIMARY, false))
-                                    .clicked()
-                                {
+                                if ui.add(titlebar_button("—", TEXT_PRIMARY, false)).clicked() {
                                     ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
                                 }
                             });
@@ -593,11 +591,14 @@ impl RgmrApp {
     fn render_wide_layout(&mut self, ui: &mut Ui, ctx: &Context) {
         let total_width = ui.available_width();
         let height = ui.available_height();
-        let left_width = (total_width * 0.25).clamp(304.0, 360.0);
-        let right_width = (total_width * 0.27).clamp(332.0, 400.0);
-        let center_width = (total_width - left_width - right_width - COLUMN_GAP * 2.0).max(420.0);
+        let effective_width = (total_width - LEFT_COLUMN_OFFSET).max(420.0);
+        let left_width = (effective_width * 0.25).clamp(304.0, 360.0);
+        let right_width = (effective_width * 0.27).clamp(332.0, 400.0);
+        let center_width =
+            (effective_width - left_width - right_width - COLUMN_GAP * 2.0).max(420.0);
 
         ui.horizontal_top(|ui| {
+            ui.add_space(LEFT_COLUMN_OFFSET);
             render_scroll_column(ui, "rgmr_left_column", left_width, height, |ui| {
                 self.render_left_content(ui)
             });
@@ -615,10 +616,12 @@ impl RgmrApp {
     fn render_split_layout(&mut self, ui: &mut Ui, ctx: &Context) {
         let total_width = ui.available_width();
         let height = ui.available_height();
-        let left_width = (total_width * 0.33).clamp(292.0, 360.0);
-        let workspace_width = (total_width - left_width - COLUMN_GAP).max(420.0);
+        let effective_width = (total_width - LEFT_COLUMN_OFFSET).max(420.0);
+        let left_width = (effective_width * 0.33).clamp(292.0, 360.0);
+        let workspace_width = (effective_width - left_width - COLUMN_GAP).max(420.0);
 
         ui.horizontal_top(|ui| {
+            ui.add_space(LEFT_COLUMN_OFFSET);
             render_scroll_column(ui, "rgmr_split_left", left_width, height, |ui| {
                 self.render_left_content(ui)
             });
@@ -632,19 +635,38 @@ impl RgmrApp {
     }
 
     fn render_stacked_layout(&mut self, ui: &mut Ui, ctx: &Context) {
-        ScrollArea::vertical()
-            .id_source("rgmr_stacked_layout")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                self.render_left_content(ui);
-                ui.add_space(12.0);
-                self.render_canvas(ui, ctx);
-                ui.add_space(12.0);
-                self.render_results_content(ui);
-            });
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), ui.available_height()),
+            Layout::top_down(Align::Min),
+            |ui| {
+                ScrollArea::vertical()
+                    .id_source("rgmr_stacked_layout")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.render_left_content(ui);
+                        ui.add_space(12.0);
+                        self.render_canvas(ui, ctx);
+                        ui.add_space(12.0);
+                        self.render_results_content(ui);
+                    });
+            },
+        );
     }
 
     fn render_footer(&mut self, ui: &mut Ui) {
+        let language = self.lang();
+        let image_value = self.state.image.as_ref().map(|image| {
+            format!(
+                "{} · {}",
+                image.asset.dimensions_label(),
+                i18n::image_source_label(language, &image.asset.source_kind)
+            )
+        });
+        let latency_value = self
+            .state
+            .last_request_latency_ms
+            .map(|latency_ms| format!("{} ms", latency_ms));
+
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), FOOTER_HEIGHT),
             Layout::top_down(Align::Min),
@@ -654,52 +676,35 @@ impl RgmrApp {
                     .rounding(bottom_rounding())
                     .inner_margin(Margin::symmetric(16.0, 10.0))
                     .show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            footer_chip(
-                                ui,
-                                self.text(TextKey::FooterStatus),
-                                i18n::request_phase_label(self.lang(), &self.state.request_phase),
-                            );
-
-                            if let Some(image) = self.state.image.as_ref() {
-                                footer_chip(
-                                    ui,
-                                    self.text(TextKey::FooterImage),
-                                    &format!(
-                                        "{} · {}",
-                                        image.asset.dimensions_label(),
-                                        i18n::image_source_label(
-                                            self.lang(),
-                                            &image.asset.source_kind,
-                                        )
-                                    ),
-                                );
-                            }
-
-                            if let Some(latency_ms) = self.state.last_request_latency_ms {
-                                footer_chip(
-                                    ui,
-                                    self.text(TextKey::FooterLatency),
-                                    &format!("{} ms", latency_ms),
-                                );
-                            }
-
-                            if let Some(parsed) = self.state.parsed_result.as_ref() {
-                                footer_chip(
-                                    ui,
-                                    self.text(TextKey::FooterParse),
-                                    i18n::parse_status_label(self.lang(), &parsed.parse_status),
-                                );
-                            }
-
-                            if let Some(store) = self.config_store.as_ref() {
-                                footer_chip(
-                                    ui,
-                                    self.text(TextKey::FooterConfigPath),
-                                    &store.config_path().display().to_string(),
-                                );
-                            }
-                        });
+                        ScrollArea::horizontal()
+                            .id_source("rgmr_footer_scroll")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    footer_chip(
+                                        ui,
+                                        self.text(TextKey::FooterStatus),
+                                        i18n::request_phase_label(
+                                            language,
+                                            &self.state.request_phase,
+                                        ),
+                                    );
+                                    if let Some(image_value) = image_value.as_deref() {
+                                        footer_chip(
+                                            ui,
+                                            self.text(TextKey::FooterImage),
+                                            image_value,
+                                        );
+                                    }
+                                    if let Some(latency_value) = latency_value.as_deref() {
+                                        footer_chip(
+                                            ui,
+                                            self.text(TextKey::FooterLatency),
+                                            latency_value,
+                                        );
+                                    }
+                                });
+                            });
                     });
             },
         );
@@ -777,108 +782,139 @@ impl RgmrApp {
 
                 ui.add_space(10.0);
                 field_label(ui, self.text(TextKey::ModelCatalogLabel));
-                if ui.available_width() < 320.0 {
-                    let button_label = if refreshing {
-                        self.text(TextKey::ModelRefreshLoading)
-                    } else {
-                        self.text(TextKey::ModelRefresh)
-                    };
-                    if ui
-                        .add_enabled(!refreshing, action_button(button_label, ACCENT_SECONDARY, true))
-                        .clicked()
-                    {
-                        self.start_model_refresh();
-                    }
-                    ui.add_space(8.0);
-
-                    let mut selected_model = self.state.config.api.model.clone();
-                    ui.add_enabled_ui(!self.state.model_catalog.is_empty(), |ui| {
-                        ComboBox::from_id_source("rgmr_model_catalog_combo_stacked")
-                            .width(ui.available_width())
-                            .selected_text(if selected_model.trim().is_empty() {
-                                self.text(TextKey::ModelLabel).to_owned()
-                            } else {
-                                selected_model.clone()
-                            })
-                            .show_ui(ui, |ui| {
-                                for model in &self.state.model_catalog {
-                                    let entry = if let Some(owner) = &model.owned_by {
-                                        format!("{}  ·  {}", model.id, owner)
-                                    } else {
-                                        model.id.clone()
-                                    };
-                                    ui.selectable_value(&mut selected_model, model.id.clone(), entry);
-                                }
-                            });
-                    });
-                    if selected_model != self.state.config.api.model {
-                        self.state.config.api.model = selected_model.clone();
-                        self.state.mark_config_dirty();
-                        self.state.push_toast(
-                            ToastTone::Accent,
-                            format!(
-                                "{}{}",
-                                self.text(TextKey::ToastModelSelectedPrefix),
-                                selected_model
-                            ),
-                        );
-                    }
+                let refresh_label = if refreshing {
+                    self.text(TextKey::ModelRefreshLoading)
                 } else {
-                    ui.horizontal(|ui| {
-                        let button_label = if refreshing {
-                            self.text(TextKey::ModelRefreshLoading)
-                        } else {
-                            self.text(TextKey::ModelRefresh)
-                        };
-                        if ui
-                            .add_enabled(!refreshing, action_button(button_label, ACCENT_SECONDARY, true))
-                            .clicked()
-                        {
-                            self.start_model_refresh();
-                        }
+                    self.text(TextKey::ModelRefresh)
+                };
 
-                        let mut selected_model = self.state.config.api.model.clone();
-                        ui.add_enabled_ui(!self.state.model_catalog.is_empty(), |ui| {
-                            ComboBox::from_id_source("rgmr_model_catalog_combo")
-                                .width((ui.available_width() - 4.0).max(120.0))
-                                .selected_text(if selected_model.trim().is_empty() {
-                                    self.text(TextKey::ModelLabel).to_owned()
-                                } else {
-                                    selected_model.clone()
-                                })
-                                .show_ui(ui, |ui| {
-                                    for model in &self.state.model_catalog {
-                                        let entry = if let Some(owner) = &model.owned_by {
-                                            format!("{}  ·  {}", model.id, owner)
-                                        } else {
-                                            model.id.clone()
-                                        };
-                                        ui.selectable_value(
-                                            &mut selected_model,
-                                            model.id.clone(),
-                                            entry,
-                                        );
-                                    }
-                                });
-                        });
-                        if selected_model != self.state.config.api.model {
-                            self.state.config.api.model = selected_model.clone();
-                            self.state.mark_config_dirty();
-                            self.state.push_toast(
-                                ToastTone::Accent,
-                                format!(
-                                    "{}{}",
-                                    self.text(TextKey::ToastModelSelectedPrefix),
-                                    selected_model
-                                ),
-                            );
-                        }
-                    });
+                if ui.available_width() < 320.0 {
+                    let available_width = ui.available_width();
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(available_width, CONTROL_HEIGHT * 2.0 + 8.0),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            if ui
+                                .add_enabled(
+                                    !refreshing,
+                                    action_button(refresh_label, ACCENT_SECONDARY, true)
+                                        .min_size(Vec2::new(available_width, CONTROL_HEIGHT)),
+                                )
+                                .clicked()
+                            {
+                                self.start_model_refresh();
+                            }
+
+                            ui.add_space(8.0);
+
+                            let mut selected_model = self.state.config.api.model.clone();
+                            ui.add_enabled_ui(!self.state.model_catalog.is_empty(), |ui| {
+                                ComboBox::from_id_source("rgmr_model_catalog_combo_stacked")
+                                    .width(available_width)
+                                    .selected_text(if selected_model.trim().is_empty() {
+                                        self.text(TextKey::ModelLabel).to_owned()
+                                    } else {
+                                        selected_model.clone()
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        for model in &self.state.model_catalog {
+                                            let entry = if let Some(owner) = &model.owned_by {
+                                                format!("{}  ·  {}", model.id, owner)
+                                            } else {
+                                                model.id.clone()
+                                            };
+                                            ui.selectable_value(
+                                                &mut selected_model,
+                                                model.id.clone(),
+                                                entry,
+                                            );
+                                        }
+                                    });
+                            });
+                            if selected_model != self.state.config.api.model {
+                                self.state.config.api.model = selected_model.clone();
+                                self.state.mark_config_dirty();
+                                self.state.push_toast(
+                                    ToastTone::Accent,
+                                    format!(
+                                        "{}{}",
+                                        self.text(TextKey::ToastModelSelectedPrefix),
+                                        selected_model
+                                    ),
+                                );
+                            }
+                        },
+                    );
+                } else {
+                    let row_width = ui.available_width();
+                    let button_width = 148.0;
+                    let combo_width = (row_width - button_width - 10.0).max(120.0);
+
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(row_width, CONTROL_HEIGHT),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            if ui
+                                .add_enabled(
+                                    !refreshing,
+                                    action_button(refresh_label, ACCENT_SECONDARY, true)
+                                        .min_size(Vec2::new(button_width, CONTROL_HEIGHT)),
+                                )
+                                .clicked()
+                            {
+                                self.start_model_refresh();
+                            }
+
+                            ui.add_space(10.0);
+
+                            let mut selected_model = self.state.config.api.model.clone();
+                            ui.add_enabled_ui(!self.state.model_catalog.is_empty(), |ui| {
+                                ComboBox::from_id_source("rgmr_model_catalog_combo")
+                                    .width(combo_width)
+                                    .selected_text(if selected_model.trim().is_empty() {
+                                        self.text(TextKey::ModelLabel).to_owned()
+                                    } else {
+                                        selected_model.clone()
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        for model in &self.state.model_catalog {
+                                            let entry = if let Some(owner) = &model.owned_by {
+                                                format!("{}  ·  {}", model.id, owner)
+                                            } else {
+                                                model.id.clone()
+                                            };
+                                            ui.selectable_value(
+                                                &mut selected_model,
+                                                model.id.clone(),
+                                                entry,
+                                            );
+                                        }
+                                    });
+                            });
+                            if selected_model != self.state.config.api.model {
+                                self.state.config.api.model = selected_model.clone();
+                                self.state.mark_config_dirty();
+                                self.state.push_toast(
+                                    ToastTone::Accent,
+                                    format!(
+                                        "{}{}",
+                                        self.text(TextKey::ToastModelSelectedPrefix),
+                                        selected_model
+                                    ),
+                                );
+                            }
+                        },
+                    );
                 }
-                small_hint(
+                stable_hint(
                     ui,
-                    &i18n::model_catalog_hint(language, &model_state, self.state.model_catalog.len()),
+                    &i18n::model_catalog_hint(
+                        language,
+                        &model_state,
+                        self.state.model_catalog.len(),
+                    ),
                     model_state_color(&model_state),
+                    MODEL_HINT_HEIGHT,
                 );
 
                 ui.add_space(8.0);
@@ -924,14 +960,6 @@ impl RgmrApp {
                 {
                     self.state.mark_config_dirty();
                 }
-
-                ui.add_space(8.0);
-                status_badge(
-                    ui,
-                    &i18n::save_state_label(language, &self.state.save_state),
-                    save_state_color(&self.state.save_state),
-                );
-                small_hint(ui, self.text(TextKey::AutosaveHint), TEXT_DIM);
             },
         );
 
@@ -977,8 +1005,10 @@ impl RgmrApp {
                         self.state.config.prompt.system_prompt =
                             i18n::default_system_prompt(language).to_owned();
                         self.state.mark_config_dirty();
-                        self.state
-                            .push_toast(ToastTone::Success, self.text(TextKey::ToastRestoredPrompt));
+                        self.state.push_toast(
+                            ToastTone::Success,
+                            self.text(TextKey::ToastRestoredPrompt),
+                        );
                     }
 
                     if ui
@@ -996,21 +1026,6 @@ impl RgmrApp {
                     ui.add_space(8.0);
                     small_hint(ui, self.text(TextKey::PromptRiskHint), WARNING);
                 }
-            },
-        );
-
-        ui.add_space(12.0);
-
-        card_panel(
-            ui,
-            ACCENT_MUTED,
-            self.text(TextKey::SectionIntake),
-            self.text(TextKey::SectionIntakeSub),
-            |ui| {
-                bullet_line(ui, self.text(TextKey::ClipboardBullet), ACCENT_SECONDARY);
-                bullet_line(ui, self.text(TextKey::DragDropBullet), ACCENT_PRIMARY);
-                bullet_line(ui, self.text(TextKey::MemoryOnlyBullet), SUCCESS);
-                bullet_line(ui, self.text(TextKey::WindowWidthBullet), TEXT_SECONDARY);
             },
         );
     }
@@ -1039,14 +1054,8 @@ impl RgmrApp {
                 } else {
                     BG_INPUT
                 };
-                let drop_stroke = Stroke::new(
-                    1.0,
-                    if drag_hover {
-                        ACCENT_SECONDARY
-                    } else {
-                        BORDER
-                    },
-                );
+                let drop_stroke =
+                    Stroke::new(1.0, if drag_hover { ACCENT_SECONDARY } else { BORDER });
 
                 UiFrame::none()
                     .fill(drop_fill)
@@ -1123,7 +1132,11 @@ impl RgmrApp {
                                 );
                                 ui.add_space(10.0);
                                 if drag_hover {
-                                    small_hint(ui, self.text(TextKey::DropToImport), ACCENT_SECONDARY);
+                                    small_hint(
+                                        ui,
+                                        self.text(TextKey::DropToImport),
+                                        ACCENT_SECONDARY,
+                                    );
                                 }
                             });
                         }
@@ -1131,22 +1144,23 @@ impl RgmrApp {
 
                 ui.add_space(14.0);
 
-                if let Some(error) = self.state.error.clone() {
-                    let message = i18n::error_message(language, &error);
-                    error_card(ui, i18n::error_title(language, &error), &message);
-                    ui.add_space(12.0);
-                }
-
-                if self.state.request_phase.is_loading() {
-                    loading_strip(
-                        ui,
-                        i18n::request_phase_label(language, &self.state.request_phase),
-                    );
-                    ui.add_space(12.0);
-                } else if self.state.image.is_some() && !validation.is_valid() {
-                    small_hint(ui, self.text(TextKey::ConfigIncomplete), WARNING);
-                    ui.add_space(12.0);
-                }
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), REQUEST_FEEDBACK_HEIGHT),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        if let Some(error) = self.state.error.clone() {
+                            let message = i18n::error_message(language, &error);
+                            error_card(ui, i18n::error_title(language, &error), &message);
+                        } else if self.state.request_phase.is_loading() {
+                            loading_strip(
+                                ui,
+                                i18n::request_phase_label(language, &self.state.request_phase),
+                            );
+                        } else if self.state.image.is_some() && !validation.is_valid() {
+                            notice_strip(ui, self.text(TextKey::ConfigIncomplete), WARNING);
+                        }
+                    },
+                );
 
                 let cta_label = if self.state.request_phase.is_loading() {
                     self.text(TextKey::Analyzing)
@@ -1177,31 +1191,44 @@ impl RgmrApp {
                     }
                 }
 
-                ui.add_space(10.0);
-                ui.horizontal_wrapped(|ui| {
-                    let select_label = if self.state.image.is_some() {
-                        self.text(TextKey::ReplaceImage)
-                    } else {
-                        self.text(TextKey::SelectImage)
-                    };
-                    if ui
-                        .add(action_button(select_label, ACCENT_SECONDARY, false))
-                        .clicked()
-                    {
-                        self.pick_image_file();
-                    }
+                if self.state.image.is_some() {
+                    ui.add_space(10.0);
+                    let button_row_width = ui.available_width();
+                    let secondary_width = ((button_row_width - 12.0) / 2.0).max(120.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add(
+                                action_button(
+                                    self.text(TextKey::ReplaceImage),
+                                    ACCENT_SECONDARY,
+                                    false,
+                                )
+                                .min_size(Vec2::new(secondary_width, CONTROL_HEIGHT)),
+                            )
+                            .clicked()
+                        {
+                            self.load_image_from_clipboard(false);
+                        }
 
-                    if self.state.image.is_some()
-                        && ui.add(danger_button(self.text(TextKey::ClearImage))).clicked()
-                    {
-                        self.state.clear_image();
-                        self.state
-                            .push_toast(ToastTone::Accent, self.text(TextKey::ToastClearedImage));
-                    }
-                });
+                        if ui
+                            .add_enabled(
+                                self.state.image.is_some(),
+                                danger_button(self.text(TextKey::ClearImage))
+                                    .min_size(Vec2::new(secondary_width, CONTROL_HEIGHT)),
+                            )
+                            .clicked()
+                        {
+                            self.state.clear_image();
+                            self.state.push_toast(
+                                ToastTone::Accent,
+                                self.text(TextKey::ToastClearedImage),
+                            );
+                        }
+                    });
+                }
 
                 ui.add_space(8.0);
-                small_hint(ui, self.text(TextKey::ShortcutHint), TEXT_DIM);
+                stable_hint(ui, self.text(TextKey::ShortcutHint), TEXT_DIM, 18.0);
             },
         );
     }
@@ -1213,15 +1240,6 @@ impl RgmrApp {
         let not_extracted = self.text(TextKey::NotExtracted);
 
         if parsed_result.is_none() && raw_output.trim().is_empty() {
-            card_panel(
-                ui,
-                ACCENT_MUTED,
-                self.text(TextKey::ResultsPlaceholderTitle),
-                self.text(TextKey::ResultsPlaceholderSub),
-                |ui| {
-                    small_hint(ui, self.text(TextKey::ResultsPlaceholderSub), TEXT_SECONDARY);
-                },
-            );
             return;
         }
 
@@ -1306,7 +1324,11 @@ impl RgmrApp {
                         }
 
                         if ui
-                            .add(action_button(self.text(TextKey::CopyFull), ACCENT_PRIMARY, false))
+                            .add(action_button(
+                                self.text(TextKey::CopyFull),
+                                ACCENT_PRIMARY,
+                                false,
+                            ))
                             .clicked()
                         {
                             self.copy_text(full_text, self.text(TextKey::ToastCopiedFull));
@@ -1314,7 +1336,11 @@ impl RgmrApp {
 
                         if !raw_output.trim().is_empty()
                             && ui
-                                .add(action_button(self.text(TextKey::CopyRaw), ACCENT_MUTED, false))
+                                .add(action_button(
+                                    self.text(TextKey::CopyRaw),
+                                    ACCENT_MUTED,
+                                    false,
+                                ))
                                 .clicked()
                         {
                             self.copy_text(
@@ -1516,9 +1542,7 @@ impl RgmrApp {
                             .inner_margin(Margin::symmetric(14.0, 12.0))
                             .show(ui, |ui| {
                                 ui.label(
-                                    RichText::new(&toast.message)
-                                        .size(12.5)
-                                        .color(TEXT_PRIMARY),
+                                    RichText::new(&toast.message).size(12.5).color(TEXT_PRIMARY),
                                 );
                             });
                         ui.add_space(8.0);
@@ -1701,12 +1725,7 @@ fn card_panel(
                     .rect_filled(strip_rect, Rounding::same(4.0), accent);
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(title)
-                            .size(17.0)
-                            .color(TEXT_PRIMARY)
-                            .strong(),
-                    );
+                    ui.label(RichText::new(title).size(17.0).color(TEXT_PRIMARY).strong());
                     ui.label(RichText::new(subtitle).size(12.0).color(TEXT_DIM));
                 });
             });
@@ -1760,7 +1779,11 @@ fn result_card(ui: &mut Ui, label: &str, value: Option<&str>, empty_label: &str,
             ui.label(
                 RichText::new(value.unwrap_or(empty_label))
                     .size(17.0)
-                    .color(if value.is_some() { TEXT_PRIMARY } else { TEXT_DIM })
+                    .color(if value.is_some() {
+                        TEXT_PRIMARY
+                    } else {
+                        TEXT_DIM
+                    })
                     .strong(),
             );
         });
@@ -1777,6 +1800,21 @@ fn loading_strip(ui: &mut Ui, text: &str) {
                 ui.add(egui::Spinner::new().size(16.0).color(ACCENT_SECONDARY));
                 ui.add_space(8.0);
                 ui.label(RichText::new(text).size(12.5).color(TEXT_PRIMARY));
+            });
+        });
+}
+
+fn notice_strip(ui: &mut Ui, text: &str, tone: Color32) {
+    UiFrame::none()
+        .fill(BG_INPUT)
+        .stroke(Stroke::new(1.0, tone.linear_multiply(0.85)))
+        .rounding(Rounding::same(16.0))
+        .inner_margin(Margin::symmetric(12.0, 10.0))
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("●").size(10.8).color(tone));
+                ui.add_space(6.0);
+                ui.label(RichText::new(text).size(12.4).color(TEXT_PRIMARY));
             });
         });
 }
@@ -1805,15 +1843,16 @@ fn status_badge(ui: &mut Ui, text: &str, tone: Color32) {
         });
 }
 
-fn bullet_line(ui: &mut Ui, text: &str, tone: Color32) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("●").size(10.0).color(tone));
-        ui.label(RichText::new(text).size(12.5).color(TEXT_SECONDARY));
-    });
-}
-
 fn small_hint(ui: &mut Ui, text: &str, color: Color32) {
     ui.label(RichText::new(text).size(11.8).color(color));
+}
+
+fn stable_hint(ui: &mut Ui, text: &str, color: Color32, height: f32) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        Layout::top_down(Align::Min),
+        |ui| small_hint(ui, text, color),
+    );
 }
 
 fn labeled_text_input(
@@ -1911,16 +1950,6 @@ fn request_phase_color(phase: &RequestPhase) -> Color32 {
     }
 }
 
-fn save_state_color(state: &crate::state::SaveState) -> Color32 {
-    match state {
-        crate::state::SaveState::Idle => TEXT_SECONDARY,
-        crate::state::SaveState::Saving => ACCENT_PRIMARY,
-        crate::state::SaveState::Saved => SUCCESS,
-        crate::state::SaveState::Invalid(_) => WARNING,
-        crate::state::SaveState::Error(_) => ERROR,
-    }
-}
-
 fn model_state_color(state: &ModelCatalogState) -> Color32 {
     match state {
         ModelCatalogState::Idle => TEXT_SECONDARY,
@@ -1957,9 +1986,9 @@ fn image_summary_line(language: Language, image: &crate::domain::ImageAsset) -> 
 
 fn missing_image_message(language: Language) -> &'static str {
     match language {
-        Language::ZhCn => "请先粘贴、拖拽或选择一张图片。",
-        Language::EnUs => "Paste, drag, or choose an image first.",
-        Language::RuRu => "Сначала вставьте, перетащите или выберите изображение.",
+        Language::ZhCn => "请先粘贴或拖拽一张图片。",
+        Language::EnUs => "Paste or drag an image first.",
+        Language::RuRu => "Сначала вставьте или перетащите изображение.",
     }
 }
 

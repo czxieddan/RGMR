@@ -1,7 +1,7 @@
 pub use analysis::{AnalysisOutcome, AnalysisRawResponse, AnalysisRequest};
 pub use config::{
-    ApiConfig, AppConfig, ConfigValidation, PromptProfile, SecurityConfig, UiConfig,
-    DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECS,
+    ApiConfig, AppConfig, ConfigValidation, DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECS, PromptProfile,
+    SecurityConfig, UiConfig,
 };
 pub use error::AppError;
 pub use image_asset::{ImageAsset, ImageSourceKind};
@@ -166,24 +166,63 @@ pub mod config {
 
     pub fn openai_endpoint_candidates(base_url: &str, tail: &str) -> Vec<String> {
         let normalized = base_url.trim().trim_end_matches('/');
-        if normalized.is_empty() {
+        let canonical_tail = tail.trim().trim_matches('/');
+        if normalized.is_empty() || canonical_tail.is_empty() {
             return Vec::new();
         }
 
-        let mut candidates = BTreeSet::new();
-        candidates.insert(format!("{normalized}/{tail}"));
+        let mut seeds = BTreeSet::new();
+        seeds.insert(normalized.to_owned());
 
-        if normalized.ends_with("/v1") {
-            if let Some(root) = normalized.strip_suffix("/v1") {
-                if !root.is_empty() {
-                    candidates.insert(format!("{root}/{tail}"));
-                }
+        let stripped = strip_known_openai_endpoint_tail(normalized);
+        if stripped != normalized {
+            seeds.insert(stripped.to_owned());
+        }
+
+        let mut candidates = BTreeSet::new();
+        for seed in seeds {
+            let seed = seed.trim_end_matches('/');
+            if seed.is_empty() {
+                continue;
             }
-        } else {
-            candidates.insert(format!("{normalized}/v1/{tail}"));
+
+            if seed.ends_with(canonical_tail) {
+                candidates.insert(seed.to_owned());
+                continue;
+            }
+
+            candidates.insert(format!("{seed}/{canonical_tail}"));
+
+            if seed.ends_with("/v1") {
+                if let Some(root) = seed.strip_suffix("/v1") {
+                    let root = root.trim_end_matches('/');
+                    if !root.is_empty() {
+                        candidates.insert(format!("{root}/{canonical_tail}"));
+                    }
+                }
+            } else {
+                candidates.insert(format!("{seed}/v1/{canonical_tail}"));
+            }
         }
 
         candidates.into_iter().collect()
+    }
+
+    fn strip_known_openai_endpoint_tail(url: &str) -> &str {
+        const KNOWN_TAILS: [&str; 5] = [
+            "/chat/completions",
+            "/responses",
+            "/completions",
+            "/models",
+            "/embeddings",
+        ];
+
+        KNOWN_TAILS
+            .iter()
+            .find_map(|suffix| url.strip_suffix(suffix))
+            .map(|value| value.trim_end_matches('/'))
+            .filter(|value| !value.is_empty())
+            .unwrap_or(url)
     }
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -292,8 +331,8 @@ pub mod config {
 }
 
 pub mod analysis {
-    use super::parsing::ParsedLocation;
     use super::AppConfig;
+    use super::parsing::ParsedLocation;
     use crate::i18n::default_user_prompt;
 
     #[derive(Clone, Debug)]

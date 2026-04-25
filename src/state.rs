@@ -211,7 +211,8 @@ impl AppState {
         };
 
         let current = self.config.api.model.trim();
-        let keep_current = !current.is_empty() && self.model_catalog.iter().any(|model| model.id == current);
+        let keep_current =
+            !current.is_empty() && self.model_catalog.iter().any(|model| model.id == current);
         if keep_current {
             return false;
         }

@@ -3,6 +3,9 @@ name = "rgmr"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+embed-resource = "3"
+
 [dependencies]
 eframe = "0.27"
 serde = { version = "1", features = ["derive"] }

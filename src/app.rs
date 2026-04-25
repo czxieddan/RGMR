@@ -2,31 +2,36 @@ use std::time::Duration;
 
 use eframe::{
     NativeOptions, Theme,
-    egui::ViewportBuilder,
+    egui::{IconData, ViewportBuilder},
 };
 use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::{
-    i18n::{self, TextKey},
     services::ConfigStore,
-    state::{AppState, SaveState, ToastTone},
+    state::{AppState, SaveState},
     ui::RgmrApp,
 };
 
 pub fn run() {
     init_tracing();
 
+    let mut viewport = ViewportBuilder::default()
+        .with_title("RGMR")
+        .with_inner_size([1600.0, 900.0])
+        .with_min_inner_size([860.0, 680.0])
+        .with_drag_and_drop(true)
+        .with_decorations(false)
+        .with_resizable(true)
+        .with_transparent(true)
+        .with_fullsize_content_view(true)
+        .with_title_shown(false);
+
+    if let Some(icon) = load_app_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+
     let options = NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_title("RGMR")
-            .with_inner_size([1460.0, 920.0])
-            .with_min_inner_size([860.0, 680.0])
-            .with_drag_and_drop(true)
-            .with_decorations(false)
-            .with_resizable(true)
-            .with_transparent(true)
-            .with_fullsize_content_view(true)
-            .with_title_shown(false),
+        viewport,
         centered: true,
         follow_system_theme: false,
         default_theme: Theme::Dark,
@@ -37,7 +42,7 @@ pub fn run() {
         "RGMR",
         options,
         Box::new(|cc| {
-            let (store, mut state) = match ConfigStore::new() {
+            let (store, state) = match ConfigStore::new() {
                 Ok(store) => {
                     let state = match store.load() {
                         Ok(config) => AppState::new(config),
@@ -58,9 +63,6 @@ pub fn run() {
                 }
             };
 
-            let language = state.config.ui.language;
-            state.push_toast(ToastTone::Accent, i18n::t(language, TextKey::ToastSupportImport));
-
             Box::new(RgmrApp::new(
                 cc.egui_ctx.clone(),
                 state,
@@ -77,4 +79,20 @@ fn init_tracing() {
         .with_target(false)
         .compact()
         .try_init();
+}
+
+fn load_app_icon() -> Option<IconData> {
+    let image = image::load_from_memory_with_format(
+        include_bytes!("../resourses/app.ico"),
+        image::ImageFormat::Ico,
+    )
+    .ok()?;
+    let rgba = image.into_rgba8();
+    let (width, height) = rgba.dimensions();
+
+    Some(IconData {
+        rgba: rgba.into_raw(),
+        width,
+        height,
+    })
 }

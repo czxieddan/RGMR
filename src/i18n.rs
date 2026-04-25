@@ -184,17 +184,29 @@ pub fn t(language: Language, key: TextKey) -> &'static str {
 
 pub fn default_system_prompt(language: Language) -> &'static str {
     match language {
-        Language::ZhCn => "你是地理识图定位助手。请根据图片内容推测地理位置，只输出一行结果，格式必须为 大洲某方位某国-国内区位大区-具体城市区位-具体地点。不要编号，不要 Markdown，不要解释，不要输出多余前缀。若无法完全确定，也必须给出最可信的层级描述，避免留空。仅当置信度明显不足时，第二行才允许输出 置信说明: 加不超过 18 个字的极短说明。",
-        Language::EnUs => "You are a geo-visual locating assistant. Infer the location from the image and output exactly one line in the format ContinentDirectionCountry-DomesticRegion-CityRegion-SpecificPlace. Do not number items, do not use Markdown, do not explain, and do not prepend any label. Even if certainty is limited, still provide the most credible hierarchy instead of leaving segments empty. Only when confidence is clearly low may you add a second line in the form Confidence note: plus a very short note within 18 words.",
-        Language::RuRu => "Ты помощник по геовизуальной локализации. Определи местоположение по изображению и выведи ровно одну строку в формате КонтинентНаправлениеСтрана-ВнутренняяЗона-ГородскаяЗона-КонкретноеМесто. Не используй нумерацию, Markdown, пояснения и лишние префиксы. Даже при неполной уверенности выдай наиболее вероятную иерархию и не оставляй сегменты пустыми. Только если уверенность явно низкая, разрешена вторая строка в виде Примечание уверенности: плюс очень короткое пояснение не длиннее 18 слов.",
+        Language::ZhCn => {
+            "你是地理识图定位助手。请根据图片内容推测地理位置，只输出一行结果，格式必须为 大洲某方位某国-国内区位大区-具体城市区位-具体地点。不要编号，不要 Markdown，不要解释，不要输出多余前缀。若无法完全确定，也必须给出最可信的层级描述，避免留空。仅当置信度明显不足时，第二行才允许输出 置信说明: 加不超过 18 个字的极短说明。"
+        }
+        Language::EnUs => {
+            "You are a geo-visual locating assistant. Infer the location from the image and output exactly one line in the format ContinentDirectionCountry-DomesticRegion-CityRegion-SpecificPlace. Do not number items, do not use Markdown, do not explain, and do not prepend any label. Even if certainty is limited, still provide the most credible hierarchy instead of leaving segments empty. Only when confidence is clearly low may you add a second line in the form Confidence note: plus a very short note within 18 words."
+        }
+        Language::RuRu => {
+            "Ты помощник по геовизуальной локализации. Определи местоположение по изображению и выведи ровно одну строку в формате КонтинентНаправлениеСтрана-ВнутренняяЗона-ГородскаяЗона-КонкретноеМесто. Не используй нумерацию, Markdown, пояснения и лишние префиксы. Даже при неполной уверенности выдай наиболее вероятную иерархию и не оставляй сегменты пустыми. Только если уверенность явно низкая, разрешена вторая строка в виде Примечание уверенности: плюс очень короткое пояснение не длиннее 18 слов."
+        }
     }
 }
 
 pub fn default_user_prompt(language: Language) -> &'static str {
     match language {
-        Language::ZhCn => "请分析图片，输出最可信的位置层级。若无法精确到具体地点，也要尽量给出最稳妥的层级定位。",
-        Language::EnUs => "Analyze the image and return the most credible location hierarchy. If the exact place is unclear, still provide the safest hierarchical estimate possible.",
-        Language::RuRu => "Проанализируй изображение и верни наиболее вероятную иерархию местоположения. Если точное место определить трудно, все равно дай максимально надежную иерархическую оценку.",
+        Language::ZhCn => {
+            "请分析图片，输出最可信的位置层级。若无法精确到具体地点，也要尽量给出最稳妥的层级定位。"
+        }
+        Language::EnUs => {
+            "Analyze the image and return the most credible location hierarchy. If the exact place is unclear, still provide the safest hierarchical estimate possible."
+        }
+        Language::RuRu => {
+            "Проанализируй изображение и верни наиболее вероятную иерархию местоположения. Если точное место определить трудно, все равно дай максимально надежную иерархическую оценку."
+        }
     }
 }
 
@@ -286,9 +298,9 @@ pub fn parse_status_hint(language: Language, status: &ParseStatus) -> &'static s
 
 pub fn error_title(language: Language, error: &AppError) -> &'static str {
     match error {
-        AppError::ConfigDirectoryUnavailable | AppError::ConfigStore(_) | AppError::Validation(_) => {
-            t(language, TextKey::ErrorTitleConfig)
-        }
+        AppError::ConfigDirectoryUnavailable
+        | AppError::ConfigStore(_)
+        | AppError::Validation(_) => t(language, TextKey::ErrorTitleConfig),
         AppError::ClipboardImageMissing | AppError::ClipboardUnavailable(_) => {
             t(language, TextKey::ErrorTitleClipboard)
         }
@@ -305,9 +317,15 @@ pub fn error_title(language: Language, error: &AppError) -> &'static str {
 
 pub fn error_message(language: Language, error: &AppError) -> String {
     match error {
-        AppError::ConfigDirectoryUnavailable => t(language, TextKey::ErrorConfigDirUnavailable).to_owned(),
+        AppError::ConfigDirectoryUnavailable => {
+            t(language, TextKey::ErrorConfigDirUnavailable).to_owned()
+        }
         AppError::ConfigStore(message) => {
-            format!("{}{}", t(language, TextKey::ErrorConfigStorePrefix), message)
+            format!(
+                "{}{}",
+                t(language, TextKey::ErrorConfigStorePrefix),
+                message
+            )
         }
         AppError::ClipboardImageMissing => t(language, TextKey::ErrorClipboardMissing).to_owned(),
         AppError::ClipboardUnavailable(message) => format!(
@@ -316,10 +334,18 @@ pub fn error_message(language: Language, error: &AppError) -> String {
             message
         ),
         AppError::UnsupportedImage(message) => {
-            format!("{}{}", t(language, TextKey::ErrorUnsupportedImagePrefix), message)
+            format!(
+                "{}{}",
+                t(language, TextKey::ErrorUnsupportedImagePrefix),
+                message
+            )
         }
         AppError::ImageProcessing(message) => {
-            format!("{}{}", t(language, TextKey::ErrorImageProcessingPrefix), message)
+            format!(
+                "{}{}",
+                t(language, TextKey::ErrorImageProcessingPrefix),
+                message
+            )
         }
         AppError::Validation(message) => message.clone(),
         AppError::Network(message) => {
@@ -331,7 +357,11 @@ pub fn error_message(language: Language, error: &AppError) -> String {
             format!("{}{}", t(language, TextKey::ErrorServicePrefix), message)
         }
         AppError::ResponseFormat(message) => {
-            format!("{}{}", t(language, TextKey::ErrorResponseFormatPrefix), message)
+            format!(
+                "{}{}",
+                t(language, TextKey::ErrorResponseFormatPrefix),
+                message
+            )
         }
     }
 }
@@ -352,9 +382,21 @@ pub fn model_catalog_hint(language: Language, state: &ModelCatalogState, count: 
 
 pub fn toast_model_catalog_loaded(language: Language, count: usize) -> String {
     match language {
-        Language::ZhCn => format!("{}{} 个模型", t(language, TextKey::ToastModelCatalogLoadedPrefix), count),
-        Language::EnUs => format!("{}{} models", t(language, TextKey::ToastModelCatalogLoadedPrefix), count),
-        Language::RuRu => format!("{}{} моделей", t(language, TextKey::ToastModelCatalogLoadedPrefix), count),
+        Language::ZhCn => format!(
+            "{}{} 个模型",
+            t(language, TextKey::ToastModelCatalogLoadedPrefix),
+            count
+        ),
+        Language::EnUs => format!(
+            "{}{} models",
+            t(language, TextKey::ToastModelCatalogLoadedPrefix),
+            count
+        ),
+        Language::RuRu => format!(
+            "{}{} моделей",
+            t(language, TextKey::ToastModelCatalogLoadedPrefix),
+            count
+        ),
     }
 }
 
@@ -380,7 +422,9 @@ fn zh(key: TextKey) -> &'static str {
         TextKey::ManualModelHint => "当服务端不暴露 /models 或目录异常时，可直接填写模型名。",
         TextKey::RequestTimeoutLabel => "请求超时",
         TextKey::SecondsLabel => "秒",
-        TextKey::ApiKeyStorageHint => "当前版本仍按明文保存 API Key 至本地 TOML，可后续升级为凭据保管。",
+        TextKey::ApiKeyStorageHint => {
+            "当前版本仍按明文保存 API Key 至本地 TOML，可后续升级为凭据保管。"
+        }
         TextKey::AutosaveHint => "配置采用去抖自动保存，关闭窗口前会再次尝试落盘。",
         TextKey::DefaultPromptBadge => "默认提示词",
         TextKey::ResetDefaultPrompt => "重置默认提示词",
@@ -393,14 +437,14 @@ fn zh(key: TextKey) -> &'static str {
         TextKey::MainTaskArea => "图片输入",
         TextKey::PasteAndAnalyze => "粘贴并识图",
         TextKey::MainCanvasSubtitle => "导入图片并输出结构化定位结果",
-        TextKey::MainCanvasAssist => "支持剪贴板粘贴、拖拽导入、文件选择",
+        TextKey::MainCanvasAssist => "支持 Ctrl+V 粘贴剪贴板图片",
         TextKey::DropToImport => "松开鼠标即可载入图片",
         TextKey::ProcessStatus => "处理状态",
         TextKey::ConfigIncomplete => "接口配置未完成，主 CTA 已暂时禁用。",
         TextKey::Analyzing => "正在分析...",
         TextKey::StartLocate => "开始定位",
         TextKey::SelectImage => "选择图片",
-        TextKey::ReplaceImage => "替换图片",
+        TextKey::ReplaceImage => "重新粘贴",
         TextKey::ClearImage => "清空",
         TextKey::ShortcutHint => "快捷键：Ctrl+V 读取图片，Ctrl+Enter 发起定位。",
         TextKey::ResultsPlaceholderTitle => "定位结果",
@@ -506,7 +550,9 @@ fn en(key: TextKey) -> &'static str {
         TextKey::SectionIntake => "Image input",
         TextKey::SectionIntakeSub => "Paste, drag, or choose a file",
         TextKey::LanguageLabel => "Language",
-        TextKey::LanguageHint => "Changes are saved immediately. If the default prompt is still in use, its language version switches too.",
+        TextKey::LanguageHint => {
+            "Changes are saved immediately. If the default prompt is still in use, its language version switches too."
+        }
         TextKey::ShowSecret => "Show",
         TextKey::HideSecret => "Hide",
         TextKey::BaseUrlLabel => "Base URL",
@@ -514,11 +560,17 @@ fn en(key: TextKey) -> &'static str {
         TextKey::ModelCatalogLabel => "Model catalog",
         TextKey::ModelLabel => "Selected model",
         TextKey::ManualModelLabel => "Manual model fallback",
-        TextKey::ManualModelHint => "If the server does not expose /models or the catalog fails, enter a model name manually.",
+        TextKey::ManualModelHint => {
+            "If the server does not expose /models or the catalog fails, enter a model name manually."
+        }
         TextKey::RequestTimeoutLabel => "Request timeout",
         TextKey::SecondsLabel => "sec",
-        TextKey::ApiKeyStorageHint => "This version still stores the API Key as plain text in local TOML. Credential vaulting can be added later.",
-        TextKey::AutosaveHint => "Configuration is saved with debounce and one final flush is attempted before exit.",
+        TextKey::ApiKeyStorageHint => {
+            "This version still stores the API Key as plain text in local TOML. Credential vaulting can be added later."
+        }
+        TextKey::AutosaveHint => {
+            "Configuration is saved with debounce and one final flush is attempted before exit."
+        }
         TextKey::DefaultPromptBadge => "Default prompt",
         TextKey::ResetDefaultPrompt => "Reset default prompt",
         TextKey::AllowConfidenceNote => "Allow a second-line confidence note",
@@ -526,22 +578,28 @@ fn en(key: TextKey) -> &'static str {
         TextKey::ClipboardBullet => "Supports Ctrl+V image capture from the clipboard",
         TextKey::DragDropBullet => "Supports drag-and-drop images and file picker import",
         TextKey::MemoryOnlyBullet => "Images stay in memory only and are not written back to disk",
-        TextKey::WindowWidthBullet => "The layout adapts automatically when the window gets narrower",
+        TextKey::WindowWidthBullet => {
+            "The layout adapts automatically when the window gets narrower"
+        }
         TextKey::MainTaskArea => "Image input",
         TextKey::PasteAndAnalyze => "Paste and analyze",
         TextKey::MainCanvasSubtitle => "Import an image and return a structured location result",
-        TextKey::MainCanvasAssist => "Clipboard paste, drag-and-drop, and file selection are supported",
+        TextKey::MainCanvasAssist => "Supports Ctrl+V clipboard paste",
         TextKey::DropToImport => "Release the pointer to load the image",
         TextKey::ProcessStatus => "Processing status",
-        TextKey::ConfigIncomplete => "Interface configuration is incomplete, so the main CTA is temporarily disabled.",
+        TextKey::ConfigIncomplete => {
+            "Interface configuration is incomplete, so the main CTA is temporarily disabled."
+        }
         TextKey::Analyzing => "Analyzing...",
         TextKey::StartLocate => "Start locating",
         TextKey::SelectImage => "Select image",
-        TextKey::ReplaceImage => "Replace image",
+        TextKey::ReplaceImage => "Paste again",
         TextKey::ClearImage => "Clear",
         TextKey::ShortcutHint => "Shortcuts: Ctrl+V loads an image, Ctrl+Enter starts locating.",
         TextKey::ResultsPlaceholderTitle => "Location result",
-        TextKey::ResultsPlaceholderSub => "Structured results and raw output will appear here after analysis.",
+        TextKey::ResultsPlaceholderSub => {
+            "Structured results and raw output will appear here after analysis."
+        }
         TextKey::StructuredResult => "Location result",
         TextKey::CopyActions => "Copy",
         TextKey::CopyStructured => "Copy hierarchy",
@@ -566,13 +624,19 @@ fn en(key: TextKey) -> &'static str {
         TextKey::FooterConfigPath => "Config path",
         TextKey::ModelRefresh => "Refresh model list",
         TextKey::ModelRefreshLoading => "Refreshing...",
-        TextKey::ModelCatalogIdleHint => "Fill in Base URL and API Key, then refresh the model catalog.",
+        TextKey::ModelCatalogIdleHint => {
+            "Fill in Base URL and API Key, then refresh the model catalog."
+        }
         TextKey::ModelCatalogLoadingHint => "Fetching available models from the server...",
-        TextKey::ModelCatalogEmptyHint => "The endpoint returned an empty model list. Check account permissions or server compatibility.",
+        TextKey::ModelCatalogEmptyHint => {
+            "The endpoint returned an empty model list. Check account permissions or server compatibility."
+        }
         TextKey::ManualModelToggle => "Show manual model fallback",
         TextKey::ToastSupportImport => "Ctrl+V, drag-and-drop, and file picking are ready",
         TextKey::ToastClipboardLoaded => "Clipboard image loaded",
-        TextKey::ToastImageNeedConfig => "The image is ready. Complete the API configuration before locating.",
+        TextKey::ToastImageNeedConfig => {
+            "The image is ready. Complete the API configuration before locating."
+        }
         TextKey::ToastRequestSubmitting => "Submitting the vision analysis request...",
         TextKey::ToastRestoredPrompt => "Restored the default prompt for the current language",
         TextKey::ToastClearedImage => "Current image cleared",
@@ -584,7 +648,9 @@ fn en(key: TextKey) -> &'static str {
         TextKey::ToastLanguageChangedPrefix => "Interface language switched to ",
         TextKey::ToastModelCatalogLoadedPrefix => "Model catalog refreshed: ",
         TextKey::ToastModelSelectedPrefix => "Selected from catalog: ",
-        TextKey::ToastModelCatalogStale => "Base URL or API Key changed. The model catalog is now marked stale.",
+        TextKey::ToastModelCatalogStale => {
+            "Base URL or API Key changed. The model catalog is now marked stale."
+        }
         TextKey::SaveIdle => "Waiting to save",
         TextKey::SaveSaving => "Saving...",
         TextKey::SaveSaved => "Saved",
@@ -617,14 +683,20 @@ fn en(key: TextKey) -> &'static str {
         TextKey::ErrorTitleRate => "Rate limited",
         TextKey::ErrorTitleService => "Service error",
         TextKey::ErrorTitleResponse => "Response error",
-        TextKey::ErrorConfigDirUnavailable => "Unable to locate the %APPDATA% directory, so configuration cannot be persisted.",
+        TextKey::ErrorConfigDirUnavailable => {
+            "Unable to locate the %APPDATA% directory, so configuration cannot be persisted."
+        }
         TextKey::ErrorConfigStorePrefix => "Configuration read/write failed: ",
-        TextKey::ErrorClipboardMissing => "No image was found in the clipboard. Copy a screenshot or image first.",
+        TextKey::ErrorClipboardMissing => {
+            "No image was found in the clipboard. Copy a screenshot or image first."
+        }
         TextKey::ErrorClipboardUnavailablePrefix => "Unable to access the clipboard: ",
         TextKey::ErrorUnsupportedImagePrefix => "The selected file is not a supported image: ",
         TextKey::ErrorImageProcessingPrefix => "Image processing failed: ",
         TextKey::ErrorNetworkPrefix => "Network request failed: ",
-        TextKey::ErrorAuthentication => "Authentication failed. Check the Base URL, API Key, and model permissions.",
+        TextKey::ErrorAuthentication => {
+            "Authentication failed. Check the Base URL, API Key, and model permissions."
+        }
         TextKey::ErrorRateLimited => "Too many requests. Please try again later.",
         TextKey::ErrorServicePrefix => "Model service error: ",
         TextKey::ErrorResponseFormatPrefix => "Model response format error: ",
@@ -643,7 +715,9 @@ fn ru(key: TextKey) -> &'static str {
         TextKey::SectionIntake => "Ввод изображения",
         TextKey::SectionIntakeSub => "Вставка, перетаскивание или выбор файла",
         TextKey::LanguageLabel => "Язык",
-        TextKey::LanguageHint => "Изменения сохраняются сразу. Если используется стандартный промпт, его языковая версия тоже переключится.",
+        TextKey::LanguageHint => {
+            "Изменения сохраняются сразу. Если используется стандартный промпт, его языковая версия тоже переключится."
+        }
         TextKey::ShowSecret => "Показать",
         TextKey::HideSecret => "Скрыть",
         TextKey::BaseUrlLabel => "Base URL",
@@ -651,34 +725,54 @@ fn ru(key: TextKey) -> &'static str {
         TextKey::ModelCatalogLabel => "Каталог моделей",
         TextKey::ModelLabel => "Выбранная модель",
         TextKey::ManualModelLabel => "Ручной резерв модели",
-        TextKey::ManualModelHint => "Если сервер не публикует /models или каталог недоступен, введите имя модели вручную.",
+        TextKey::ManualModelHint => {
+            "Если сервер не публикует /models или каталог недоступен, введите имя модели вручную."
+        }
         TextKey::RequestTimeoutLabel => "Тайм-аут запроса",
         TextKey::SecondsLabel => "сек",
-        TextKey::ApiKeyStorageHint => "В этой версии API Key все еще хранится как открытый текст в локальном TOML. Позже можно перейти на безопасное хранилище.",
-        TextKey::AutosaveHint => "Конфигурация сохраняется с debounce, а перед выходом выполняется финальная попытка записи.",
+        TextKey::ApiKeyStorageHint => {
+            "В этой версии API Key все еще хранится как открытый текст в локальном TOML. Позже можно перейти на безопасное хранилище."
+        }
+        TextKey::AutosaveHint => {
+            "Конфигурация сохраняется с debounce, а перед выходом выполняется финальная попытка записи."
+        }
         TextKey::DefaultPromptBadge => "Стандартный промпт",
         TextKey::ResetDefaultPrompt => "Сбросить стандартный промпт",
         TextKey::AllowConfidenceNote => "Разрешить вторую строку с пометкой уверенности",
-        TextKey::PromptRiskHint => "Текущий промпт может снизить стабильность структурного парсинга.",
+        TextKey::PromptRiskHint => {
+            "Текущий промпт может снизить стабильность структурного парсинга."
+        }
         TextKey::ClipboardBullet => "Поддерживается Ctrl+V для чтения изображения из буфера обмена",
-        TextKey::DragDropBullet => "Поддерживаются перетаскивание изображения и импорт через выбор файла",
-        TextKey::MemoryOnlyBullet => "Изображения обрабатываются только в памяти и не записываются обратно на диск",
+        TextKey::DragDropBullet => {
+            "Поддерживаются перетаскивание изображения и импорт через выбор файла"
+        }
+        TextKey::MemoryOnlyBullet => {
+            "Изображения обрабатываются только в памяти и не записываются обратно на диск"
+        }
         TextKey::WindowWidthBullet => "При уменьшении окна макет перестраивается автоматически",
         TextKey::MainTaskArea => "Ввод изображения",
         TextKey::PasteAndAnalyze => "Вставить и анализировать",
-        TextKey::MainCanvasSubtitle => "Импортируйте изображение и получите структурированный результат локализации",
-        TextKey::MainCanvasAssist => "Поддерживаются вставка из буфера, drag-and-drop и выбор файла",
+        TextKey::MainCanvasSubtitle => {
+            "Импортируйте изображение и получите структурированный результат локализации"
+        }
+        TextKey::MainCanvasAssist => "Поддерживается вставка изображения через Ctrl+V",
         TextKey::DropToImport => "Отпустите указатель, чтобы загрузить изображение",
         TextKey::ProcessStatus => "Статус обработки",
-        TextKey::ConfigIncomplete => "Конфигурация интерфейса неполная, поэтому основное действие временно отключено.",
+        TextKey::ConfigIncomplete => {
+            "Конфигурация интерфейса неполная, поэтому основное действие временно отключено."
+        }
         TextKey::Analyzing => "Идет анализ...",
         TextKey::StartLocate => "Начать локализацию",
         TextKey::SelectImage => "Выбрать изображение",
-        TextKey::ReplaceImage => "Заменить изображение",
+        TextKey::ReplaceImage => "Вставить заново",
         TextKey::ClearImage => "Очистить",
-        TextKey::ShortcutHint => "Горячие клавиши: Ctrl+V загружает изображение, Ctrl+Enter запускает локализацию.",
+        TextKey::ShortcutHint => {
+            "Горячие клавиши: Ctrl+V загружает изображение, Ctrl+Enter запускает локализацию."
+        }
         TextKey::ResultsPlaceholderTitle => "Результат",
-        TextKey::ResultsPlaceholderSub => "После анализа здесь появятся структурированный результат и сырой вывод.",
+        TextKey::ResultsPlaceholderSub => {
+            "После анализа здесь появятся структурированный результат и сырой вывод."
+        }
         TextKey::StructuredResult => "Результат",
         TextKey::CopyActions => "Копирование",
         TextKey::CopyStructured => "Копировать иерархию",
@@ -703,13 +797,19 @@ fn ru(key: TextKey) -> &'static str {
         TextKey::FooterConfigPath => "Путь к конфигу",
         TextKey::ModelRefresh => "Обновить список моделей",
         TextKey::ModelRefreshLoading => "Обновление...",
-        TextKey::ModelCatalogIdleHint => "Заполните Base URL и API Key, затем обновите каталог моделей.",
+        TextKey::ModelCatalogIdleHint => {
+            "Заполните Base URL и API Key, затем обновите каталог моделей."
+        }
         TextKey::ModelCatalogLoadingHint => "Запрашиваются доступные модели с сервера...",
-        TextKey::ModelCatalogEmptyHint => "Эндпоинт вернул пустой список моделей. Проверьте права аккаунта или совместимость сервера.",
+        TextKey::ModelCatalogEmptyHint => {
+            "Эндпоинт вернул пустой список моделей. Проверьте права аккаунта или совместимость сервера."
+        }
         TextKey::ManualModelToggle => "Показать ручной резерв модели",
         TextKey::ToastSupportImport => "Ctrl+V, drag-and-drop и выбор файла уже готовы",
         TextKey::ToastClipboardLoaded => "Изображение из буфера загружено",
-        TextKey::ToastImageNeedConfig => "Изображение готово. Завершите настройку API перед локализацией.",
+        TextKey::ToastImageNeedConfig => {
+            "Изображение готово. Завершите настройку API перед локализацией."
+        }
         TextKey::ToastRequestSubmitting => "Отправляется запрос визуального анализа...",
         TextKey::ToastRestoredPrompt => "Восстановлен стандартный промпт для текущего языка",
         TextKey::ToastClearedImage => "Текущее изображение очищено",
@@ -721,7 +821,9 @@ fn ru(key: TextKey) -> &'static str {
         TextKey::ToastLanguageChangedPrefix => "Язык интерфейса переключен на ",
         TextKey::ToastModelCatalogLoadedPrefix => "Каталог моделей обновлен: ",
         TextKey::ToastModelSelectedPrefix => "Выбрано из каталога: ",
-        TextKey::ToastModelCatalogStale => "Base URL или API Key изменились. Каталог моделей помечен как устаревший.",
+        TextKey::ToastModelCatalogStale => {
+            "Base URL или API Key изменились. Каталог моделей помечен как устаревший."
+        }
         TextKey::SaveIdle => "Ожидание сохранения",
         TextKey::SaveSaving => "Сохранение...",
         TextKey::SaveSaved => "Сохранено",
@@ -754,14 +856,22 @@ fn ru(key: TextKey) -> &'static str {
         TextKey::ErrorTitleRate => "Лимит частоты",
         TextKey::ErrorTitleService => "Ошибка сервиса",
         TextKey::ErrorTitleResponse => "Ошибка ответа",
-        TextKey::ErrorConfigDirUnavailable => "Не удалось найти каталог %APPDATA%, поэтому конфигурацию нельзя сохранить.",
+        TextKey::ErrorConfigDirUnavailable => {
+            "Не удалось найти каталог %APPDATA%, поэтому конфигурацию нельзя сохранить."
+        }
         TextKey::ErrorConfigStorePrefix => "Ошибка чтения или записи конфигурации: ",
-        TextKey::ErrorClipboardMissing => "Изображение в буфере обмена не найдено. Сначала скопируйте скриншот или картинку.",
+        TextKey::ErrorClipboardMissing => {
+            "Изображение в буфере обмена не найдено. Сначала скопируйте скриншот или картинку."
+        }
         TextKey::ErrorClipboardUnavailablePrefix => "Нет доступа к буферу обмена: ",
-        TextKey::ErrorUnsupportedImagePrefix => "Выбранный файл не является поддерживаемым изображением: ",
+        TextKey::ErrorUnsupportedImagePrefix => {
+            "Выбранный файл не является поддерживаемым изображением: "
+        }
         TextKey::ErrorImageProcessingPrefix => "Ошибка обработки изображения: ",
         TextKey::ErrorNetworkPrefix => "Сетевой запрос завершился ошибкой: ",
-        TextKey::ErrorAuthentication => "Аутентификация не прошла. Проверьте Base URL, API Key и права на модель.",
+        TextKey::ErrorAuthentication => {
+            "Аутентификация не прошла. Проверьте Base URL, API Key и права на модель."
+        }
         TextKey::ErrorRateLimited => "Слишком много запросов. Повторите попытку позже.",
         TextKey::ErrorServicePrefix => "Ошибка сервиса модели: ",
         TextKey::ErrorResponseFormatPrefix => "Ошибка формата ответа модели: ",
