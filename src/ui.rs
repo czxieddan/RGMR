@@ -15,6 +15,7 @@ use eframe::egui::{
     RichText, Rounding, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2, ViewportCommand,
 };
 use eframe::{App, Frame};
+use image::ImageFormat;
 use tracing::error;
 
 use crate::{
@@ -74,6 +75,11 @@ struct ModelCatalogMessage {
     result: Result<Vec<ModelDescriptor>, AppError>,
 }
 
+struct AnalysisWorkerMessage {
+    request_id: String,
+    result: Result<AnalysisOutcome, AppError>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DashboardLayout {
     Wide,
@@ -98,11 +104,13 @@ pub struct RgmrApp {
     state: AppState,
     config_store: Option<ConfigStore>,
     save_debounce: Duration,
-    analysis_tx: Sender<Result<AnalysisOutcome, AppError>>,
-    analysis_rx: Receiver<Result<AnalysisOutcome, AppError>>,
+    analysis_tx: Sender<AnalysisWorkerMessage>,
+    analysis_rx: Receiver<AnalysisWorkerMessage>,
     model_tx: Sender<ModelCatalogMessage>,
     model_rx: Receiver<ModelCatalogMessage>,
     show_raw_output: bool,
+    active_analysis_request_id: Option<String>,
+    github_mark_texture: Option<egui::TextureHandle>,
 }
 
 impl RgmrApp {
@@ -114,6 +122,7 @@ impl RgmrApp {
     ) -> Self {
         apply_fonts(&ctx);
         apply_theme(&ctx);
+        let github_mark_texture = load_github_mark_texture(&ctx);
         let (analysis_tx, analysis_rx) = mpsc::channel();
         let (model_tx, model_rx) = mpsc::channel();
 
@@ -127,6 +136,8 @@ impl RgmrApp {
             model_tx,
             model_rx,
             show_raw_output: false,
+            active_analysis_request_id: None,
+            github_mark_texture,
         }
     }
 
@@ -145,18 +156,19 @@ impl RgmrApp {
                 .push_toast(ToastTone::Success, self.text(TextKey::ToastGithubOpened)),
             Err(err) => self.state.push_toast(
                 ToastTone::Danger,
-                format!(
-                    "{}{}",
-                    self.text(TextKey::ToastGithubOpenFailedPrefix),
-                    err
-                ),
+                format!("{}{}", self.text(TextKey::ToastGithubOpenFailedPrefix), err),
             ),
         }
     }
 
     fn consume_worker_results(&mut self) {
-        while let Ok(result) = self.analysis_rx.try_recv() {
-            match result {
+        while let Ok(message) = self.analysis_rx.try_recv() {
+            if self.active_analysis_request_id.as_deref() != Some(message.request_id.as_str()) {
+                continue;
+            }
+
+            self.active_analysis_request_id = None;
+            match message.result {
                 Ok(outcome) => {
                     let hint = i18n::parse_status_hint(self.lang(), &outcome.parsed.parse_status)
                         .to_owned();
@@ -209,7 +221,7 @@ impl RgmrApp {
         let paste_requested =
             ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::V));
         if paste_requested {
-            self.load_image_from_clipboard(false);
+            self.load_image_from_clipboard(true);
         }
 
         let analyze_requested =
@@ -238,6 +250,7 @@ impl RgmrApp {
         match ImagePipelineService::from_clipboard() {
             Ok(asset) => {
                 self.state.set_image(asset);
+                self.active_analysis_request_id = None;
                 self.state
                     .push_toast(ToastTone::Success, self.text(TextKey::ToastClipboardLoaded));
 
@@ -265,6 +278,7 @@ impl RgmrApp {
             Ok(asset) => {
                 let source_label = i18n::image_source_label(self.lang(), &asset.source_kind);
                 self.state.set_image(asset);
+                self.active_analysis_request_id = None;
                 self.state.push_toast(
                     ToastTone::Success,
                     format!(
@@ -309,9 +323,11 @@ impl RgmrApp {
         };
 
         let request = build_analysis_request(&self.state.config, &image.asset);
+        let request_id = request.request_id.clone();
         let tx = self.analysis_tx.clone();
         let ctx = self.ctx.clone();
 
+        self.active_analysis_request_id = Some(request_id.clone());
         self.state.request_phase = RequestPhase::Preparing;
         self.state.clear_error();
         self.state.push_toast(
@@ -325,7 +341,7 @@ impl RgmrApp {
                 client.analyze(&request)
             })();
 
-            let _ = tx.send(result);
+            let _ = tx.send(AnalysisWorkerMessage { request_id, result });
             ctx.request_repaint();
         });
 
@@ -760,12 +776,10 @@ impl RgmrApp {
                         } else {
                             center_limit
                         };
-                        let max_center_left =
-                            (button_rect.left() - FOOTER_SAFE_GAP - center_width)
-                                .max(content_rect.left());
-                        let center_left =
-                            (content_rect.center().x - center_width * 0.5)
-                                .clamp(content_rect.left(), max_center_left);
+                        let max_center_left = (button_rect.left() - FOOTER_SAFE_GAP - center_width)
+                            .max(content_rect.left());
+                        let center_left = (content_rect.center().x - center_width * 0.5)
+                            .clamp(content_rect.left(), max_center_left);
                         let center_rect = Rect::from_min_size(
                             egui::pos2(center_left, content_rect.top()),
                             egui::vec2(center_width, content_rect.height()),
@@ -814,8 +828,13 @@ impl RgmrApp {
                         }
 
                         ui.allocate_ui_at_rect(button_rect, |ui| {
-                            let response = github_button(ui, "GitHub", button_width)
-                                .on_hover_text(self.text(TextKey::FooterGithubTooltip));
+                            let response = github_button(
+                                ui,
+                                self.github_mark_texture.as_ref(),
+                                "GitHub",
+                                button_width,
+                            )
+                            .on_hover_text(self.text(TextKey::FooterGithubTooltip));
                             if response.clicked() {
                                 self.open_repository();
                             }
@@ -1322,7 +1341,7 @@ impl RgmrApp {
                             )
                             .clicked()
                         {
-                            self.load_image_from_clipboard(false);
+                            self.load_image_from_clipboard(true);
                         }
 
                         if ui
@@ -1868,7 +1887,12 @@ fn footer_chip(ui: &mut Ui, label: &str, value: &str) {
         });
 }
 
-fn github_button(ui: &mut Ui, label: &str, width: f32) -> egui::Response {
+fn github_button(
+    ui: &mut Ui,
+    github_mark_texture: Option<&egui::TextureHandle>,
+    label: &str,
+    width: f32,
+) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, FOOTER_BUTTON_HEIGHT), Sense::click());
 
@@ -1897,20 +1921,35 @@ fn github_button(ui: &mut Ui, label: &str, width: f32) -> egui::Response {
         );
 
         let compact = width < FOOTER_BUTTON_WIDTH;
-        let icon_center = egui::pos2(
-            rect.left() + if compact { 15.2 } else { 16.2 },
-            rect.center().y + 0.25,
-        );
-        let icon_color = TEXT_PRIMARY;
-        paint_github_mark(
-            ui,
-            icon_center,
-            if compact { 12.2 } else { 13.0 },
-            icon_color,
-            fill,
-        );
+        if let Some(texture) = github_mark_texture {
+            let icon_size = if compact { 12.2 } else { 13.0 };
+            let icon_rect = Rect::from_center_size(
+                egui::pos2(
+                    rect.left() + if compact { 15.2 } else { 16.2 },
+                    rect.center().y,
+                ),
+                egui::vec2(icon_size, icon_size),
+            );
+            ui.painter().image(
+                texture.id(),
+                icon_rect,
+                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+
         ui.painter().text(
-            egui::pos2(rect.left() + if compact { 28.0 } else { 30.0 }, rect.center().y),
+            egui::pos2(
+                rect.left()
+                    + if github_mark_texture.is_some() {
+                        if compact { 28.0 } else { 30.0 }
+                    } else if compact {
+                        14.0
+                    } else {
+                        16.0
+                    },
+                rect.center().y,
+            ),
             Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(if compact { 12.2 } else { 12.8 }),
@@ -1921,63 +1960,22 @@ fn github_button(ui: &mut Ui, label: &str, width: f32) -> egui::Response {
     response
 }
 
-fn paint_github_mark(ui: &mut Ui, center: egui::Pos2, size: f32, color: Color32, cutout: Color32) {
-    let painter = ui.painter();
-    let head_center = egui::pos2(center.x - size * 0.01, center.y - size * 0.02);
-    let head_radius = size * 0.27;
+fn load_github_mark_texture(ctx: &Context) -> Option<egui::TextureHandle> {
+    let image = image::load_from_memory_with_format(
+        include_bytes!("../resourses/GitHubWhite20.png"),
+        ImageFormat::Png,
+    )
+    .ok()?;
+    let rgba = image.into_rgba8();
+    let (width, height) = rgba.dimensions();
+    let color_image =
+        egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], rgba.as_raw());
 
-    painter.circle_filled(head_center, head_radius, color);
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            egui::pos2(head_center.x - head_radius * 0.94, head_center.y - head_radius * 0.42),
-            egui::pos2(head_center.x - head_radius * 0.46, head_center.y - head_radius * 1.46),
-            egui::pos2(head_center.x - head_radius * 0.06, head_center.y - head_radius * 0.62),
-        ],
-        color,
-        Stroke::NONE,
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            egui::pos2(head_center.x + head_radius * 0.94, head_center.y - head_radius * 0.42),
-            egui::pos2(head_center.x + head_radius * 0.46, head_center.y - head_radius * 1.46),
-            egui::pos2(head_center.x + head_radius * 0.06, head_center.y - head_radius * 0.62),
-        ],
-        color,
-        Stroke::NONE,
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            egui::pos2(head_center.x - head_radius * 0.22, head_center.y - head_radius * 0.96),
-            egui::pos2(head_center.x, head_center.y - head_radius * 0.66),
-            egui::pos2(head_center.x + head_radius * 0.22, head_center.y - head_radius * 0.96),
-        ],
-        cutout,
-        Stroke::NONE,
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            egui::pos2(head_center.x - head_radius * 1.02, head_center.y + head_radius * 0.56),
-            egui::pos2(head_center.x - head_radius * 0.58, head_center.y + head_radius * 1.28),
-            egui::pos2(head_center.x, head_center.y + head_radius * 0.92),
-            egui::pos2(head_center.x + head_radius * 0.58, head_center.y + head_radius * 1.28),
-            egui::pos2(head_center.x + head_radius * 1.02, head_center.y + head_radius * 0.56),
-            egui::pos2(head_center.x + head_radius * 0.42, head_center.y + head_radius * 1.66),
-            egui::pos2(head_center.x, head_center.y + head_radius * 1.42),
-            egui::pos2(head_center.x - head_radius * 0.42, head_center.y + head_radius * 1.66),
-        ],
-        color,
-        Stroke::NONE,
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            egui::pos2(head_center.x + head_radius * 0.54, head_center.y + head_radius * 1.06),
-            egui::pos2(head_center.x + head_radius * 1.48, head_center.y + head_radius * 0.72),
-            egui::pos2(head_center.x + head_radius * 1.28, head_center.y + head_radius * 0.38),
-            egui::pos2(head_center.x + head_radius * 0.44, head_center.y + head_radius * 0.80),
-        ],
-        color,
-        Stroke::NONE,
-    ));
+    Some(ctx.load_texture(
+        "rgmr-github-mark-official",
+        color_image,
+        egui::TextureOptions::LINEAR,
+    ))
 }
 
 fn field_label(ui: &mut Ui, text: &str) {

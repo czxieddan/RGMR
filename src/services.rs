@@ -14,7 +14,9 @@ use std::{
 use arboard::Clipboard;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use directories::BaseDirs;
-use image::{DynamicImage, GenericImageView, ImageFormat, imageops::FilterType};
+use image::{
+    DynamicImage, GenericImageView, ImageFormat, codecs::jpeg::JpegEncoder, imageops::FilterType,
+};
 use reqwest::blocking::Client;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -28,6 +30,8 @@ use crate::domain::{
 
 const APP_NAME: &str = "RGMR";
 const MAX_IMAGE_EDGE: u32 = 1600;
+const CLIPBOARD_MAX_WIDTH: u32 = 1080;
+const CLIPBOARD_JPEG_QUALITY: u8 = 88;
 const RGMR_USER_AGENT: &str = concat!("RGMR/", env!("CARGO_PKG_VERSION"));
 const MAX_RESPONSE_PREVIEW_CHARS: usize = 220;
 const MAX_DIAGNOSTIC_ITEMS: usize = 4;
@@ -93,12 +97,7 @@ impl ImagePipelineService {
             AppError::ImageProcessing("Clipboard bitmap format is invalid".to_owned())
         })?;
 
-        Self::from_dynamic_image(
-            DynamicImage::ImageRgba8(buffer),
-            ImageSourceKind::Clipboard,
-            None,
-            Some("image/png".to_owned()),
-        )
+        Self::from_clipboard_image(DynamicImage::ImageRgba8(buffer))
     }
 
     pub fn from_file(path: &Path, source_kind: ImageSourceKind) -> Result<ImageAsset, AppError> {
@@ -111,6 +110,44 @@ impl ImagePipelineService {
             .map(|name| name.to_string_lossy().to_string());
 
         Self::from_dynamic_image(image, source_kind, name, Some(mime))
+    }
+
+    fn from_clipboard_image(image: DynamicImage) -> Result<ImageAsset, AppError> {
+        let resized = resize_clipboard_image(image);
+        let rgba = resized.to_rgba8();
+        let (width, height) = resized.dimensions();
+        let rgb = flatten_rgba_over_white(&rgba);
+
+        let mut encoded = Cursor::new(Vec::new());
+        let mut encoder = JpegEncoder::new_with_quality(&mut encoded, CLIPBOARD_JPEG_QUALITY);
+        encoder
+            .encode_image(&DynamicImage::ImageRgb8(rgb))
+            .map_err(|err| AppError::ImageProcessing(err.to_string()))?;
+        let upload_bytes = encoded.into_inner();
+        let mime_type = "image/jpeg".to_owned();
+        let data_url = format!(
+            "data:{};base64,{}",
+            mime_type,
+            STANDARD.encode(&upload_bytes)
+        );
+        let sha256 = format!("{:x}", Sha256::digest(&upload_bytes));
+        let acquired_at_epoch_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or_default();
+
+        Ok(ImageAsset {
+            source_kind: ImageSourceKind::Clipboard,
+            original_name: None,
+            mime_type,
+            width,
+            height,
+            preview_rgba: rgba.into_raw(),
+            upload_bytes,
+            data_url,
+            sha256,
+            acquired_at_epoch_ms,
+        })
     }
 
     fn from_dynamic_image(
@@ -774,6 +811,33 @@ fn concise_error(error: &AppError) -> String {
         | AppError::Authentication
         | AppError::RateLimited => error.to_string(),
     }
+}
+
+fn resize_clipboard_image(image: DynamicImage) -> DynamicImage {
+    let (width, height) = image.dimensions();
+    if width <= CLIPBOARD_MAX_WIDTH {
+        return image;
+    }
+
+    let scale = CLIPBOARD_MAX_WIDTH as f32 / width as f32;
+    let new_height = ((height as f32) * scale).round().max(1.0) as u32;
+    image.resize(CLIPBOARD_MAX_WIDTH, new_height, FilterType::Lanczos3)
+}
+
+fn flatten_rgba_over_white(image: &image::RgbaImage) -> image::RgbImage {
+    let (width, height) = image.dimensions();
+    let mut flattened = image::RgbImage::new(width, height);
+
+    for (x, y, pixel) in image.enumerate_pixels() {
+        let [r, g, b, a] = pixel.0;
+        let alpha = a as f32 / 255.0;
+        let blend = |channel: u8| -> u8 {
+            ((channel as f32 * alpha) + (255.0 * (1.0 - alpha))).round() as u8
+        };
+        flattened.put_pixel(x, y, image::Rgb([blend(r), blend(g), blend(b)]));
+    }
+
+    flattened
 }
 
 fn resize_if_needed(image: DynamicImage) -> DynamicImage {
