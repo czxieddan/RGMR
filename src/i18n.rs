@@ -804,7 +804,9 @@ fn ru(key: TextKey) -> &'static str {
         TextKey::FooterLatency => "Задержка",
         TextKey::FooterParse => "Парсинг",
         TextKey::FooterConfigPath => "Путь к конфигу",
-        TextKey::FooterGithubTooltip => "Открыть GitHub-репозиторий проекта в браузере по умолчанию",
+        TextKey::FooterGithubTooltip => {
+            "Открыть GitHub-репозиторий проекта в браузере по умолчанию"
+        }
         TextKey::ToastGithubOpened => "GitHub-репозиторий открыт в браузере по умолчанию",
         TextKey::ToastGithubOpenFailedPrefix => "Не удалось открыть GitHub-репозиторий: ",
         TextKey::ModelRefresh => "Обновить список моделей",

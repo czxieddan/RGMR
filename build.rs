@@ -8,7 +8,7 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("out dir"));
     let icon_path = manifest_dir.join("resourses").join("app.ico");
-    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.1.0".to_owned());
+    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "1.0.0".to_owned());
     let (major, minor, patch, build) = parse_version_parts(&version);
 
     let rc_source = format!(

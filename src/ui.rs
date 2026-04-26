@@ -23,7 +23,9 @@ use crate::{
         AnalysisOutcome, AppError, ImageSourceKind, ModelDescriptor, ParseStatus, ValidationIssue,
     },
     i18n::{self, Language, TextKey},
-    services::{ConfigStore, ImagePipelineService, VisionClient, build_analysis_request},
+    services::{
+        ConfigStore, GlobalPasteMonitor, ImagePipelineService, VisionClient, build_analysis_request,
+    },
     state::{AppState, ModelCatalogState, RequestPhase, ToastTone},
 };
 
@@ -119,6 +121,7 @@ pub struct RgmrApp {
     show_raw_output: bool,
     active_analysis_request_id: Option<String>,
     github_mark_texture: Option<egui::TextureHandle>,
+    global_paste_monitor: Option<GlobalPasteMonitor>,
 }
 
 impl RgmrApp {
@@ -133,6 +136,13 @@ impl RgmrApp {
         let github_mark_texture = load_github_mark_texture(&ctx);
         let (analysis_tx, analysis_rx) = mpsc::channel();
         let (model_tx, model_rx) = mpsc::channel();
+        let global_paste_monitor = match GlobalPasteMonitor::new(ctx.clone()) {
+            Ok(monitor) => Some(monitor),
+            Err(err) => {
+                error!("failed to start global Ctrl+V listener: {err}");
+                None
+            }
+        };
 
         Self {
             ctx,
@@ -146,6 +156,7 @@ impl RgmrApp {
             show_raw_output: false,
             active_analysis_request_id: None,
             github_mark_texture,
+            global_paste_monitor,
         }
     }
 
@@ -254,7 +265,22 @@ impl RgmrApp {
         }
     }
 
+    fn handle_global_paste(&mut self) {
+        let trigger_count = self
+            .global_paste_monitor
+            .as_ref()
+            .map(GlobalPasteMonitor::drain_triggers)
+            .unwrap_or_default();
+        if trigger_count > 0 {
+            self.load_image_from_clipboard_internal(true, true);
+        }
+    }
+
     fn load_image_from_clipboard(&mut self, auto_analyze: bool) {
+        self.load_image_from_clipboard_internal(auto_analyze, false);
+    }
+
+    fn load_image_from_clipboard_internal(&mut self, auto_analyze: bool, silent_if_missing: bool) {
         match ImagePipelineService::from_clipboard() {
             Ok(asset) => {
                 self.state.set_image(asset);
@@ -273,6 +299,12 @@ impl RgmrApp {
                     }
                 }
             }
+            Err(err)
+                if silent_if_missing
+                    && matches!(
+                        err,
+                        AppError::ClipboardImageMissing | AppError::ClipboardUnavailable(_)
+                    ) => {}
             Err(err) => {
                 let message = i18n::error_message(self.lang(), &err);
                 self.state.set_error(err);
@@ -887,7 +919,6 @@ impl RgmrApp {
                 if selected_language != self.state.config.ui.language {
                     self.update_language(selected_language);
                 }
-                small_hint(ui, self.text(TextKey::LanguageHint), TEXT_DIM);
 
                 ui.add_space(10.0);
                 if labeled_text_input(
@@ -921,8 +952,6 @@ impl RgmrApp {
                 }
                 if let Some(issue) = validation.api_key.as_ref() {
                     small_hint(ui, i18n::validation_message(language, issue), ERROR);
-                } else {
-                    small_hint(ui, self.text(TextKey::ApiKeyStorageHint), TEXT_DIM);
                 }
 
                 ui.add_space(10.0);
@@ -1096,7 +1125,8 @@ impl RgmrApp {
                 field_label(ui, self.text(TextKey::RequestTimeoutLabel));
                 let seconds_label = self.text(TextKey::SecondsLabel);
                 if ui
-                    .add(
+                    .add_sized(
+                        [ui.available_width(), CONTROL_HEIGHT],
                         egui::Slider::new(&mut self.state.config.api.timeout_sec, 10..=180)
                             .text(seconds_label)
                             .show_value(true),
@@ -1116,16 +1146,6 @@ impl RgmrApp {
             self.text(TextKey::SectionPrompt),
             self.text(TextKey::SectionPromptSub),
             |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    status_badge(ui, self.text(TextKey::DefaultPromptBadge), ACCENT_SECONDARY);
-                    status_badge(
-                        ui,
-                        &self.state.config.prompt.output_format_version,
-                        ACCENT_MUTED,
-                    );
-                });
-                ui.add_space(10.0);
-
                 let response = ui.add(
                     TextEdit::multiline(&mut self.state.config.prompt.system_prompt)
                         .desired_width(f32::INFINITY)
@@ -1371,9 +1391,6 @@ impl RgmrApp {
                         }
                     });
                 }
-
-                ui.add_space(8.0);
-                stable_hint(ui, self.text(TextKey::ShortcutHint), TEXT_DIM, 18.0);
             },
         );
     }
@@ -1511,14 +1528,20 @@ impl RgmrApp {
                     );
                     if let Some(note) = parsed.confidence_note.as_deref() {
                         ui.add_space(10.0);
-                        ui.label(
-                            RichText::new(format!(
-                                "{}: {}",
-                                i18n::confidence_prefix(language),
-                                note
-                            ))
-                            .size(12.5)
-                            .color(TEXT_SECONDARY),
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), 20.0),
+                            Layout::right_to_left(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{}: {}",
+                                        i18n::confidence_prefix(language),
+                                        note
+                                    ))
+                                    .size(12.5)
+                                    .color(TEXT_SECONDARY),
+                                );
+                            },
                         );
                     }
                     if parsed.parse_status == ParseStatus::Fallback {
@@ -1701,6 +1724,7 @@ impl App for RgmrApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         apply_theme(ctx);
         self.consume_worker_results();
+        self.handle_global_paste();
         self.handle_file_drop(ctx);
         self.handle_shortcuts(ctx);
         self.flush_debounced_save();
@@ -2125,7 +2149,9 @@ fn ellipsize_middle(value: &str, max_chars: usize) -> String {
     let leading = (max_chars - 1).div_ceil(2);
     let trailing = max_chars - 1 - leading;
     let prefix: String = chars.iter().take(leading).collect();
-    let suffix: String = chars[chars.len().saturating_sub(trailing)..].iter().collect();
+    let suffix: String = chars[chars.len().saturating_sub(trailing)..]
+        .iter()
+        .collect();
     format!("{prefix}…{suffix}")
 }
 
@@ -2142,24 +2168,61 @@ fn labeled_text_input(
 
     if let Some((show_label, hide_label)) = toggle_labels {
         let mut changed = false;
-        ui.horizontal(|ui| {
-            let field_width = (ui.available_width() - 86.0).max(120.0);
-            let response = ui.add_sized(
-                [field_width, CONTROL_HEIGHT],
-                single_line_text_edit(value, hint, secret && !*show_secret),
+        let row_width = ui.available_width();
+        let button_width: f32 = 82.0;
+
+        if row_width < 240.0 {
+            changed = ui
+                .add_sized(
+                    [row_width, CONTROL_HEIGHT],
+                    single_line_text_edit(value, hint, secret && !*show_secret),
+                )
+                .changed();
+            ui.add_space(8.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .add_sized(
+                        [button_width.min(ui.available_width()), CONTROL_HEIGHT],
+                        action_button(
+                            if *show_secret { hide_label } else { show_label },
+                            ACCENT_MUTED,
+                            false,
+                        ),
+                    )
+                    .clicked()
+                {
+                    *show_secret = !*show_secret;
+                }
+            });
+        } else {
+            ui.allocate_ui_with_layout(
+                egui::vec2(row_width, CONTROL_HEIGHT),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    let field_width = (row_width - button_width - 10.0).max(120.0);
+                    let response = ui.add_sized(
+                        [field_width, CONTROL_HEIGHT],
+                        single_line_text_edit(value, hint, secret && !*show_secret),
+                    );
+                    changed = response.changed();
+                    ui.add_space(10.0);
+                    if ui
+                        .add_sized(
+                            [button_width, CONTROL_HEIGHT],
+                            action_button(
+                                if *show_secret { hide_label } else { show_label },
+                                ACCENT_MUTED,
+                                false,
+                            ),
+                        )
+                        .clicked()
+                    {
+                        *show_secret = !*show_secret;
+                    }
+                },
             );
-            changed = response.changed();
-            if ui
-                .add(action_button(
-                    if *show_secret { hide_label } else { show_label },
-                    ACCENT_MUTED,
-                    false,
-                ))
-                .clicked()
-            {
-                *show_secret = !*show_secret;
-            }
-        });
+        }
+
         changed
     } else {
         ui.add_sized(

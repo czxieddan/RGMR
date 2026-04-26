@@ -31,7 +31,7 @@ pub mod config {
     pub const DEFAULT_TIMEOUT_SECS: u64 = 45;
 
     fn default_version() -> String {
-        "2".to_owned()
+        "1.0.0".to_owned()
     }
 
     fn default_base_url() -> String {
@@ -80,7 +80,7 @@ pub mod config {
             self.prompt.repair_defaults(self.ui.language);
             self.security.repair_defaults();
 
-            if self.version.trim().is_empty() {
+            if self.version.trim() != default_version() {
                 self.version = default_version();
             }
         }

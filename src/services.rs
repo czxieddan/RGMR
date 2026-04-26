@@ -16,6 +16,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(target_os = "windows")]
 use clipboard_win::{Getter, formats, raw};
 use directories::BaseDirs;
+use eframe::egui::Context;
 use image::{
     DynamicImage, GenericImageView, ImageFormat, codecs::jpeg::JpegEncoder, imageops::FilterType,
 };
@@ -23,7 +24,26 @@ use reqwest::blocking::Client;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+#[cfg(target_os = "windows")]
+use std::sync::{OnceLock, atomic::AtomicU32};
 use uuid::Uuid;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::{
+    Foundation::{LPARAM, LRESULT, WPARAM},
+    System::{
+        LibraryLoader::GetModuleHandleW,
+        Threading::{GetCurrentProcessId, GetCurrentThreadId},
+    },
+    UI::{
+        Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL},
+        WindowsAndMessaging::{
+            CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW,
+            GetWindowThreadProcessId, HC_ACTION, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
+            SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN,
+            WM_QUIT, WM_SYSKEYDOWN,
+        },
+    },
+};
 
 use crate::domain::{
     AnalysisOutcome, AnalysisRawResponse, AnalysisRequest, ApiConfig, AppConfig, AppError,
@@ -36,6 +56,10 @@ const CLIPBOARD_MAX_WIDTH: u32 = 1080;
 const CLIPBOARD_JPEG_QUALITY: u8 = 88;
 #[cfg(target_os = "windows")]
 const WINDOWS_CLIPBOARD_OPEN_ATTEMPTS: usize = 10;
+#[cfg(target_os = "windows")]
+const WINDOWS_CF_DIBV5: u32 = 17;
+#[cfg(target_os = "windows")]
+const GLOBAL_PASTE_TRIGGER_COOLDOWN_MS: u32 = 280;
 const RGMR_USER_AGENT: &str = concat!("RGMR/", env!("CARGO_PKG_VERSION"));
 const MAX_RESPONSE_PREVIEW_CHARS: usize = 220;
 const MAX_DIAGNOSTIC_ITEMS: usize = 4;
@@ -84,28 +108,159 @@ impl ConfigStore {
     }
 }
 
+#[cfg(target_os = "windows")]
+struct GlobalPasteHookState {
+    sender: mpsc::Sender<()>,
+    ctx: Context,
+    process_id: u32,
+    last_trigger_tick: AtomicU32,
+}
+
+#[cfg(target_os = "windows")]
+static GLOBAL_PASTE_HOOK_STATE: OnceLock<GlobalPasteHookState> = OnceLock::new();
+
+pub struct GlobalPasteMonitor {
+    #[cfg(target_os = "windows")]
+    rx: mpsc::Receiver<()>,
+    #[cfg(target_os = "windows")]
+    thread_id: u32,
+    #[cfg(target_os = "windows")]
+    join_handle: Option<thread::JoinHandle<()>>,
+}
+
+impl GlobalPasteMonitor {
+    pub fn new(ctx: Context) -> Result<Self, AppError> {
+        #[cfg(target_os = "windows")]
+        {
+            let (tx, rx) = mpsc::channel();
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let process_id = unsafe { GetCurrentProcessId() };
+
+            let join_handle = thread::spawn(move || {
+                if GLOBAL_PASTE_HOOK_STATE
+                    .set(GlobalPasteHookState {
+                        sender: tx,
+                        ctx,
+                        process_id,
+                        last_trigger_tick: AtomicU32::new(0),
+                    })
+                    .is_err()
+                {
+                    let _ = ready_tx.send(Err(AppError::Service(
+                        "Global Ctrl+V listener is already initialized".to_owned(),
+                    )));
+                    return;
+                }
+
+                let thread_id = unsafe { GetCurrentThreadId() };
+                let module = unsafe { GetModuleHandleW(std::ptr::null()) };
+                let hook = unsafe {
+                    SetWindowsHookExW(WH_KEYBOARD_LL, Some(global_paste_keyboard_proc), module, 0)
+                };
+                if hook.is_null() {
+                    let _ = ready_tx.send(Err(AppError::Service(
+                        "Failed to register global Ctrl+V keyboard listener".to_owned(),
+                    )));
+                    return;
+                }
+
+                let _ = ready_tx.send(Ok(thread_id));
+
+                let mut message: MSG = unsafe { std::mem::zeroed() };
+                while unsafe { GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) } > 0 {
+                    unsafe {
+                        TranslateMessage(&message);
+                        DispatchMessageW(&message);
+                    }
+                }
+
+                unsafe {
+                    UnhookWindowsHookEx(hook);
+                }
+            });
+
+            let thread_ready = ready_rx.recv().map_err(|err| {
+                AppError::Service(format!(
+                    "Failed to start global Ctrl+V listener thread: {err}"
+                ))
+            })?;
+            let thread_id = thread_ready?;
+
+            return Ok(Self {
+                rx,
+                thread_id,
+                join_handle: Some(join_handle),
+            });
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = ctx;
+            Ok(Self {})
+        }
+    }
+
+    pub fn drain_triggers(&self) -> usize {
+        #[cfg(target_os = "windows")]
+        {
+            let mut drained = 0;
+            while self.rx.try_recv().is_ok() {
+                drained += 1;
+            }
+            return drained;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            0
+        }
+    }
+}
+
+impl Drop for GlobalPasteMonitor {
+    fn drop(&mut self) {
+        #[cfg(target_os = "windows")]
+        {
+            if self.thread_id != 0 {
+                unsafe {
+                    PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0);
+                }
+            }
+
+            if let Some(join_handle) = self.join_handle.take() {
+                let _ = join_handle.join();
+            }
+        }
+    }
+}
+
 pub struct ImagePipelineService;
 
 impl ImagePipelineService {
     pub fn from_clipboard() -> Result<ImageAsset, AppError> {
-        match Self::try_from_clipboard_arboard() {
-            Ok(asset) => Ok(asset),
-            Err(primary_error) => {
-                #[cfg(target_os = "windows")]
-                {
-                    match try_from_clipboard_windows_fallback() {
-                        Ok(Some(asset)) => return Ok(asset),
-                        Ok(None) => {}
-                        Err(fallback_error) => {
-                            if matches!(primary_error, AppError::ClipboardUnavailable(_)) {
-                                return Err(fallback_error);
-                            }
-                        }
+        #[cfg(target_os = "windows")]
+        {
+            match try_from_clipboard_windows_native() {
+                Ok(Some(asset)) => return Ok(asset),
+                Ok(None) => return Self::try_from_clipboard_arboard(),
+                Err(native_error) => match Self::try_from_clipboard_arboard() {
+                    Ok(asset) => return Ok(asset),
+                    Err(arboard_error)
+                        if matches!(
+                            arboard_error,
+                            AppError::ClipboardImageMissing | AppError::ClipboardUnavailable(_)
+                        ) =>
+                    {
+                        return Err(native_error);
                     }
-                }
-
-                Err(primary_error)
+                    Err(arboard_error) => return Err(arboard_error),
+                },
             }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            Self::try_from_clipboard_arboard()
         }
     }
 
@@ -852,7 +1007,56 @@ fn map_arboard_image_error(error: ArboardError) -> AppError {
 }
 
 #[cfg(target_os = "windows")]
-fn try_from_clipboard_windows_fallback() -> Result<Option<ImageAsset>, AppError> {
+unsafe extern "system" fn global_paste_keyboard_proc(
+    code: i32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if code == HC_ACTION as i32
+        && (wparam == WM_KEYDOWN as usize || wparam == WM_SYSKEYDOWN as usize)
+        && let Some(state) = GLOBAL_PASTE_HOOK_STATE.get()
+    {
+        let keyboard = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
+        if keyboard.vkCode == u32::from(b'V')
+            && ctrl_is_pressed()
+            && !foreground_belongs_to_current_process(state.process_id)
+        {
+            let previous_tick = state
+                .last_trigger_tick
+                .swap(keyboard.time, Ordering::AcqRel);
+            if previous_tick == 0
+                || keyboard.time.wrapping_sub(previous_tick) >= GLOBAL_PASTE_TRIGGER_COOLDOWN_MS
+            {
+                let _ = state.sender.send(());
+                state.ctx.request_repaint();
+            }
+        }
+    }
+
+    unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
+}
+
+#[cfg(target_os = "windows")]
+fn ctrl_is_pressed() -> bool {
+    unsafe { GetAsyncKeyState(VK_CONTROL as i32) < 0 }
+}
+
+#[cfg(target_os = "windows")]
+fn foreground_belongs_to_current_process(process_id: u32) -> bool {
+    let foreground_window = unsafe { GetForegroundWindow() };
+    if foreground_window.is_null() {
+        return false;
+    }
+
+    let mut foreground_process_id = 0;
+    unsafe {
+        GetWindowThreadProcessId(foreground_window, &mut foreground_process_id);
+    }
+    foreground_process_id == process_id
+}
+
+#[cfg(target_os = "windows")]
+fn try_from_clipboard_windows_native() -> Result<Option<ImageAsset>, AppError> {
     let _clipboard = clipboard_win::Clipboard::new_attempts(WINDOWS_CLIPBOARD_OPEN_ATTEMPTS)
         .map_err(|err| AppError::ClipboardUnavailable(err.to_string()))?;
 
@@ -865,6 +1069,12 @@ fn try_from_clipboard_windows_fallback() -> Result<Option<ImageAsset>, AppError>
     }
 
     match try_decode_windows_dib_clipboard_image() {
+        Ok(Some(image)) => return ImagePipelineService::from_clipboard_image(image).map(Some),
+        Ok(None) => {}
+        Err(err) => last_error = Some(err),
+    }
+
+    match try_decode_windows_dibv5_clipboard_image() {
         Ok(Some(image)) => return ImagePipelineService::from_clipboard_image(image).map(Some),
         Ok(None) => {}
         Err(err) => last_error = Some(err),
@@ -901,12 +1111,24 @@ fn try_decode_windows_png_clipboard_image() -> Result<Option<DynamicImage>, AppE
 
 #[cfg(target_os = "windows")]
 fn try_decode_windows_dib_clipboard_image() -> Result<Option<DynamicImage>, AppError> {
-    if !raw::is_format_avail(formats::CF_DIB) {
+    try_decode_windows_dib_format_clipboard_image(formats::CF_DIB)
+}
+
+#[cfg(target_os = "windows")]
+fn try_decode_windows_dibv5_clipboard_image() -> Result<Option<DynamicImage>, AppError> {
+    try_decode_windows_dib_format_clipboard_image(WINDOWS_CF_DIBV5)
+}
+
+#[cfg(target_os = "windows")]
+fn try_decode_windows_dib_format_clipboard_image(
+    format: u32,
+) -> Result<Option<DynamicImage>, AppError> {
+    if !raw::is_format_avail(format) {
         return Ok(None);
     }
 
     let mut dib_bytes = Vec::new();
-    raw::get_vec(formats::CF_DIB, &mut dib_bytes)
+    raw::get_vec(format, &mut dib_bytes)
         .map_err(|err| AppError::ClipboardUnavailable(err.to_string()))?;
 
     let bitmap_bytes = bitmap_file_from_dib(&dib_bytes)?;
@@ -967,9 +1189,7 @@ fn bitmap_file_from_dib(dib_bytes: &[u8]) -> Result<Vec<u8>, AppError> {
         .checked_add(bitfield_bytes)
         .and_then(|offset| offset.checked_add(palette_entries.saturating_mul(4)))
         .filter(|offset| *offset < dib_bytes.len())
-        .ok_or_else(|| {
-            AppError::ImageProcessing("Clipboard DIB layout is invalid".to_owned())
-        })?;
+        .ok_or_else(|| AppError::ImageProcessing("Clipboard DIB layout is invalid".to_owned()))?;
     let file_size = BITMAPFILEHEADER_SIZE
         .checked_add(dib_bytes.len())
         .ok_or_else(|| AppError::ImageProcessing("Clipboard image is too large".to_owned()))?;
@@ -986,17 +1206,17 @@ fn bitmap_file_from_dib(dib_bytes: &[u8]) -> Result<Vec<u8>, AppError> {
 
 #[cfg(target_os = "windows")]
 fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, AppError> {
-    let raw = bytes
-        .get(offset..offset + 2)
-        .ok_or_else(|| AppError::ImageProcessing("Clipboard image header is truncated".to_owned()))?;
+    let raw = bytes.get(offset..offset + 2).ok_or_else(|| {
+        AppError::ImageProcessing("Clipboard image header is truncated".to_owned())
+    })?;
     Ok(u16::from_le_bytes([raw[0], raw[1]]))
 }
 
 #[cfg(target_os = "windows")]
 fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, AppError> {
-    let raw = bytes
-        .get(offset..offset + 4)
-        .ok_or_else(|| AppError::ImageProcessing("Clipboard image header is truncated".to_owned()))?;
+    let raw = bytes.get(offset..offset + 4).ok_or_else(|| {
+        AppError::ImageProcessing("Clipboard image header is truncated".to_owned())
+    })?;
     Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
 }
 

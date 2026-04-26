@@ -3228,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "rgmr"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "arboard",
  "base64",
@@ -3248,6 +3248,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "webbrowser 1.2.1",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
