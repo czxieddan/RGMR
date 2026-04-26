@@ -18,7 +18,7 @@
 </div>
 
 <p align="center">
-  <img src="https://i.imgur.com/aKYLkDl.png" alt="RGMR 主展示图" width="100%" />
+  <img src="https://i.imgur.com/aKYLkDl.png" alt="主展示图" width="100%" />
 </p>
 
 ## 项目简介
@@ -77,7 +77,7 @@ RGMR 会引导模型按层级输出结果，并将返回内容解析为以下结
 ### 主界面
 
 <p align="center">
-  <img src="https://i.imgur.com/aKYLkDl.png" alt="RGMR 主界面" width="100%" />
+  <img src="https://i.imgur.com/aKYLkDl.png" alt="主界面" width="100%" />
 </p>
 
 <p align="center"><sub>配置区、图片导入区与结构化结果面板集中在同一桌面工作流中。</sub></p>
@@ -85,7 +85,7 @@ RGMR 会引导模型按层级输出结果，并将返回内容解析为以下结
 ### 精准度
 
 <p align="center">
-  <img src="https://i.imgur.com/JKJJwwD.png" alt="RGMR 精准度" width="100%" />
+  <img src="https://i.imgur.com/JKJJwwD.png" alt="精准度" width="100%" />
 </p>
 
 <p align="center"><sub>模型输出会被整理为更便于阅读与判断的地理定位层级结果。</sub></p>
