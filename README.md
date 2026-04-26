@@ -78,10 +78,10 @@ RGMR 会引导模型按层级输出结果，并将返回内容解析为以下结
 
 <p align="center"><sub>配置区、图片导入区与结构化结果面板集中在同一桌面工作流中。</sub></p>
 
-### 实机效果 / 结果展示
+### 精准度
 
 <p align="center">
-  <img src="https://i.imgur.com/JKJJwwD.png" alt="RGMR 结果展示" width="100%" />
+  <img src="https://i.imgur.com/JKJJwwD.png" alt="RGMR 精准度" width="100%" />
 </p>
 
 <p align="center"><sub>模型输出会被整理为更便于阅读与判断的地理定位层级结果。</sub></p>
@@ -124,7 +124,7 @@ cargo run --release
 ### Base URL
 
 - 默认值为 `https://api.openai.com/v1`
-- 你可以填写服务根地址、`/v1` 地址，甚至某些已经带有接口尾路径的兼容地址
+- 你可以填写服务根地址、`/v1` 地址
 - 程序会自动规整并尝试推导可用的聊天补全与模型列表端点
 
 ### API Key
@@ -154,11 +154,10 @@ cargo run --release
 - 支持开启或关闭置信说明输出
 - 如果你深度改写提示词，可能会削弱结构化解析的稳定性
 
-### 超时与配置落盘
+### 超时与配置
 
 - 请求超时支持在 `10` 到 `180` 秒之间调整
 - 配置会自动保存到系统配置目录下的 `RGMR/config.toml`
-- 在 Windows 环境中，常见位置通常可理解为 `%APPDATA%\RGMR\config.toml`
 
 ## 使用流程
 
@@ -191,38 +190,15 @@ target/release/rgmr.exe
 
 项目在 Windows 下包含资源嵌入逻辑，会在构建过程中写入应用图标与版本信息，以获得更完整的桌面程序呈现效果。
 
-## 项目结构简介
+## 许可证
 
-```text
-.
-├─ Cargo.toml
-├─ build.rs
-└─ src
-   ├─ app.rs
-   ├─ domain.rs
-   ├─ i18n.rs
-   ├─ services.rs
-   ├─ state.rs
-   └─ ui.rs
-```
-
-核心文件职责如下：
-
-- [`Cargo.toml`](Cargo.toml)：项目元信息与依赖声明
-- [`build.rs`](build.rs)：Windows 资源嵌入与版本信息处理
-- [`src/app.rs`](src/app.rs)：应用启动、窗口初始化与运行入口
-- [`src/ui.rs`](src/ui.rs)：桌面界面、交互流程与结果展示
-- [`src/services.rs`](src/services.rs)：配置持久化、图片处理、模型请求与结果解析
-- [`src/domain.rs`](src/domain.rs)：配置结构、领域模型与解析结果定义
-- [`src/state.rs`](src/state.rs)：运行时状态管理
-- [`src/i18n.rs`](src/i18n.rs)：界面文案、多语言与默认提示词
-
-## 许可证说明
+<a href="https://gnu.ac.cn/licenses/agpl-3.0.html">
+ <img src=https://gnu.ac.cn/graphics/agplv3-with-text-162x68.png alt="GNU Affero General Public License v3.0 (AGPL v3)">
+</a>
 
 本项目采用 GNU Affero General Public License v3.0 许可证发布。详情请参阅 [`LICENSE`](LICENSE)。
 
 ## 说明
 
 - RGMR 自身不提供模型服务，也不附带 API Key
-- 你导入的图片会随请求发送至你配置的 OpenAI 兼容服务
-- README 仅描述当前仓库中已经实现或可直接验证的能力，不对未展示的功能做额外承诺
+- 导入的图片会随请求发送至你配置的 OpenAI 兼容服务，隐私安全不由 RGMR 保障
