@@ -41,7 +41,7 @@ BEGIN
             VALUE "OriginalFilename", "rgmr.exe\0"
             VALUE "ProductName", "RGMR\0"
             VALUE "ProductVersion", "{}\0"
-            VALUE "LegalCopyright", "Copyright © 2026  CzXieDdan\0"
+            VALUE "LegalCopyright", "Copyright © 2026 CzXieDdan\0"
         END
     END
     BLOCK "VarFileInfo"

@@ -43,12 +43,17 @@ const TEXT_PRIMARY: Color32 = Color32::from_rgb(241, 246, 252);
 const TEXT_SECONDARY: Color32 = Color32::from_rgb(165, 179, 201);
 const TEXT_DIM: Color32 = Color32::from_rgb(113, 128, 151);
 
-const WINDOW_MARGIN: f32 = 10.0;
+const WINDOW_MARGIN: f32 = 12.0;
 const WINDOW_RADIUS: f32 = 26.0;
 const CARD_RADIUS: f32 = 22.0;
 const CONTROL_RADIUS: f32 = 16.0;
 const TITLE_BAR_HEIGHT: f32 = 72.0;
-const FOOTER_HEIGHT: f32 = 48.0;
+const FOOTER_HEIGHT: f32 = 52.0;
+const FOOTER_GAP: f32 = 8.0;
+const FOOTER_BUTTON_WIDTH: f32 = 116.0;
+const FOOTER_BUTTON_HEIGHT: f32 = 30.0;
+const FOOTER_CENTER_WIDTH: f32 = 244.0;
+const FOOTER_SAFE_GAP: f32 = 16.0;
 const COLUMN_GAP: f32 = 14.0;
 const RESIZE_HANDLE: f32 = 8.0;
 const RESIZE_CORNER: f32 = 22.0;
@@ -56,7 +61,9 @@ const LEFT_COLUMN_OFFSET: f32 = 8.0;
 const CONTROL_HEIGHT: f32 = 40.0;
 const MODEL_HINT_HEIGHT: f32 = 20.0;
 const REQUEST_FEEDBACK_HEIGHT: f32 = 88.0;
-const WINDOW_CONTENT_INSET: f32 = 1.0;
+const WINDOW_CONTENT_INSET: f32 = 2.0;
+const COPYRIGHT_TEXT: &str = "Copyright © 2026 CzXieDdan";
+const GITHUB_REPOSITORY_URL: &str = env!("CARGO_PKG_REPOSITORY");
 
 struct ModelCatalogMessage {
     identity: String,
@@ -125,6 +132,22 @@ impl RgmrApp {
 
     fn text(&self, key: TextKey) -> &'static str {
         i18n::t(self.lang(), key)
+    }
+
+    fn open_repository(&mut self) {
+        match webbrowser::open(GITHUB_REPOSITORY_URL) {
+            Ok(()) => self
+                .state
+                .push_toast(ToastTone::Success, self.text(TextKey::ToastGithubOpened)),
+            Err(err) => self.state.push_toast(
+                ToastTone::Danger,
+                format!(
+                    "{}{}",
+                    self.text(TextKey::ToastGithubOpenFailedPrefix),
+                    err
+                ),
+            ),
+        }
     }
 
     fn consume_worker_results(&mut self) {
@@ -443,14 +466,14 @@ impl RgmrApp {
                         self.render_title_bar(ui, ctx);
                         ui.add_space(12.0);
 
-                        let body_height = (ui.available_height() - FOOTER_HEIGHT - 8.0).max(120.0);
+                        let body_height = (ui.available_height() - FOOTER_HEIGHT - FOOTER_GAP).max(0.0);
                         ui.allocate_ui_with_layout(
                             egui::vec2(ui.available_width(), body_height),
                             Layout::top_down(Align::Min),
                             |ui| self.render_workspace(ui, ctx),
                         );
 
-                        ui.add_space(8.0);
+                        ui.add_space(FOOTER_GAP);
                         self.render_footer(ui);
                     });
             });
@@ -655,13 +678,6 @@ impl RgmrApp {
 
     fn render_footer(&mut self, ui: &mut Ui) {
         let language = self.lang();
-        let image_value = self.state.image.as_ref().map(|image| {
-            format!(
-                "{} · {}",
-                image.asset.dimensions_label(),
-                i18n::image_source_label(language, &image.asset.source_kind)
-            )
-        });
         let latency_value = self
             .state
             .last_request_latency_ms
@@ -674,28 +690,39 @@ impl RgmrApp {
                 UiFrame::none()
                     .fill(BG_WINDOW_TOP)
                     .rounding(bottom_rounding())
-                    .inner_margin(Margin::symmetric(16.0, 10.0))
+                    .inner_margin(Margin::symmetric(18.0, 9.0))
                     .show(ui, |ui| {
-                        ScrollArea::horizontal()
-                            .id_source("rgmr_footer_scroll")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    footer_chip(
-                                        ui,
-                                        self.text(TextKey::FooterStatus),
-                                        i18n::request_phase_label(
-                                            language,
-                                            &self.state.request_phase,
-                                        ),
-                                    );
-                                    if let Some(image_value) = image_value.as_deref() {
-                                        footer_chip(
-                                            ui,
-                                            self.text(TextKey::FooterImage),
-                                            image_value,
-                                        );
-                                    }
+                        let content_rect = ui.max_rect();
+                        let button_rect = Rect::from_min_size(
+                            egui::pos2(
+                                content_rect.right() - FOOTER_BUTTON_WIDTH,
+                                content_rect.center().y - FOOTER_BUTTON_HEIGHT * 0.5,
+                            ),
+                            egui::vec2(FOOTER_BUTTON_WIDTH, FOOTER_BUTTON_HEIGHT),
+                        );
+                        let center_width = content_rect.width().min(FOOTER_CENTER_WIDTH);
+                        let center_left = (content_rect.center().x - center_width * 0.5)
+                            .max(content_rect.left());
+                        let center_right = (center_left + center_width)
+                            .min(button_rect.left() - FOOTER_SAFE_GAP)
+                            .max(center_left);
+                        let left_rect = Rect::from_min_max(
+                            content_rect.min,
+                            egui::pos2(
+                                (center_left - FOOTER_SAFE_GAP).max(content_rect.left()),
+                                content_rect.max.y,
+                            ),
+                        );
+                        let show_latency = content_rect.width() >= 1120.0;
+
+                        ui.allocate_ui_at_rect(left_rect, |ui| {
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                footer_chip(
+                                    ui,
+                                    self.text(TextKey::FooterStatus),
+                                    i18n::request_phase_label(language, &self.state.request_phase),
+                                );
+                                if show_latency {
                                     if let Some(latency_value) = latency_value.as_deref() {
                                         footer_chip(
                                             ui,
@@ -703,8 +730,25 @@ impl RgmrApp {
                                             latency_value,
                                         );
                                     }
-                                });
+                                }
                             });
+                        });
+
+                        ui.painter().text(
+                            egui::pos2((center_left + center_right) * 0.5, content_rect.center().y),
+                            Align2::CENTER_CENTER,
+                            COPYRIGHT_TEXT,
+                            egui::FontId::proportional(11.5),
+                            TEXT_DIM,
+                        );
+
+                        ui.allocate_ui_at_rect(button_rect, |ui| {
+                            let response = github_button(ui, "GitHub")
+                                .on_hover_text(self.text(TextKey::FooterGithubTooltip));
+                            if response.clicked() {
+                                self.open_repository();
+                            }
+                        });
                     });
             },
         );
@@ -1751,6 +1795,90 @@ fn footer_chip(ui: &mut Ui, label: &str, value: &str) {
                     .color(TEXT_SECONDARY),
             );
         });
+}
+
+fn github_button(ui: &mut Ui, label: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(FOOTER_BUTTON_WIDTH, FOOTER_BUTTON_HEIGHT),
+        Sense::click(),
+    );
+
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+
+    if ui.is_rect_visible(rect) {
+        let fill = if response.is_pointer_button_down_on() {
+            ACCENT_SECONDARY.linear_multiply(0.18)
+        } else if response.hovered() {
+            BG_SURFACE_ALT
+        } else {
+            BG_INPUT
+        };
+        let stroke = if response.hovered() {
+            BORDER_STRONG
+        } else {
+            BORDER
+        };
+        ui.painter().rect(
+            rect,
+            Rounding::same(12.0),
+            fill,
+            Stroke::new(if response.hovered() { 1.1 } else { 1.0 }, stroke),
+        );
+
+        let icon_center = egui::pos2(rect.left() + 18.0, rect.center().y + 0.4);
+        let icon_color = TEXT_PRIMARY;
+        ui.painter()
+            .circle_stroke(icon_center, 6.8, Stroke::new(1.2, icon_color));
+        ui.painter().line_segment(
+            [
+                egui::pos2(icon_center.x - 4.0, icon_center.y - 5.2),
+                egui::pos2(icon_center.x - 1.4, icon_center.y - 9.2),
+            ],
+            Stroke::new(1.2, icon_color),
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(icon_center.x + 4.0, icon_center.y - 5.2),
+                egui::pos2(icon_center.x + 1.4, icon_center.y - 9.2),
+            ],
+            Stroke::new(1.2, icon_color),
+        );
+        ui.painter().circle_filled(
+            egui::pos2(icon_center.x - 2.2, icon_center.y - 0.3),
+            0.9,
+            icon_color,
+        );
+        ui.painter().circle_filled(
+            egui::pos2(icon_center.x + 2.2, icon_center.y - 0.3),
+            0.9,
+            icon_color,
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(icon_center.x - 2.4, icon_center.y + 3.3),
+                egui::pos2(icon_center.x, icon_center.y + 4.6),
+            ],
+            Stroke::new(1.1, icon_color),
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(icon_center.x + 2.4, icon_center.y + 3.3),
+                egui::pos2(icon_center.x, icon_center.y + 4.6),
+            ],
+            Stroke::new(1.1, icon_color),
+        );
+        ui.painter().text(
+            egui::pos2(rect.left() + 31.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            egui::FontId::proportional(12.8),
+            TEXT_PRIMARY,
+        );
+    }
+
+    response
 }
 
 fn field_label(ui: &mut Ui, text: &str) {
