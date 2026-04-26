@@ -1,7 +1,7 @@
 <div align="center">
 
 <p align="center">
-  <img src="https://i.imgur.com/4R1Fttl.png" alt="app" />
+  <img src="https://i.imgur.com/d7PUXzu.png" alt="app" />
 </p>
 
 # RGMR
