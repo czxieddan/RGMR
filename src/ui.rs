@@ -67,6 +67,14 @@ const CONTROL_HEIGHT: f32 = 40.0;
 const MODEL_HINT_HEIGHT: f32 = 20.0;
 const REQUEST_FEEDBACK_HEIGHT: f32 = 88.0;
 const WINDOW_CONTENT_INSET: f32 = 2.0;
+const LEFT_COLUMN_WIDE_WIDTH: f32 = 332.0;
+const LEFT_COLUMN_SPLIT_WIDTH: f32 = 332.0;
+const MODEL_REFRESH_BUTTON_WIDTH: f32 = 148.0;
+const MODEL_COMBO_MIN_WIDTH: f32 = 120.0;
+const MODEL_COMBO_TEXT_CHROME: f32 = 44.0;
+const MODEL_COMBO_MIN_VISIBLE_CHARS: usize = 10;
+const MODEL_COMBO_APPROX_CHAR_WIDTH: f32 = 7.2;
+const GITHUB_BUTTON_ICON_GAP: f32 = 8.0;
 const COPYRIGHT_TEXT: &str = "Copyright © 2026 CzXieDdan";
 const GITHUB_REPOSITORY_URL: &str = env!("CARGO_PKG_REPOSITORY");
 
@@ -657,7 +665,7 @@ impl RgmrApp {
     fn render_wide_layout(&mut self, ui: &mut Ui, ctx: &Context) {
         let total_width = ui.available_width();
         let height = ui.available_height();
-        let left_width = (total_width * 0.25).clamp(304.0, 360.0);
+        let left_width = LEFT_COLUMN_WIDE_WIDTH;
         let right_width = (total_width * 0.27).clamp(332.0, 400.0);
         let center_width = total_width - left_width - right_width - COLUMN_GAP * 2.0;
 
@@ -688,7 +696,7 @@ impl RgmrApp {
     fn render_split_layout(&mut self, ui: &mut Ui, ctx: &Context) {
         let total_width = ui.available_width();
         let height = ui.available_height();
-        let left_width = (total_width * 0.33).clamp(292.0, 360.0);
+        let left_width = LEFT_COLUMN_SPLIT_WIDTH;
         let workspace_width = total_width - left_width - COLUMN_GAP;
 
         if workspace_width < 420.0 {
@@ -852,6 +860,9 @@ impl RgmrApp {
         let refreshing = matches!(&model_state, ModelCatalogState::Loading);
         let show_secret_label = self.text(TextKey::ShowSecret);
         let hide_secret_label = self.text(TextKey::HideSecret);
+        let left_panel_width = ui.available_width();
+        ui.set_width(left_panel_width);
+        ui.set_max_width(left_panel_width);
 
         card_panel(
             ui,
@@ -945,11 +956,11 @@ impl RgmrApp {
                             ui.add_enabled_ui(!self.state.model_catalog.is_empty(), |ui| {
                                 ComboBox::from_id_source("rgmr_model_catalog_combo_stacked")
                                     .width(available_width)
-                                    .selected_text(if selected_model.trim().is_empty() {
-                                        self.text(TextKey::ModelLabel).to_owned()
-                                    } else {
-                                        selected_model.clone()
-                                    })
+                                    .selected_text(model_combo_selected_text(
+                                        &selected_model,
+                                        self.text(TextKey::ModelLabel),
+                                        available_width,
+                                    ))
                                     .show_ui(ui, |ui| {
                                         for model in &self.state.model_catalog {
                                             let entry = if let Some(owner) = &model.owned_by {
@@ -981,8 +992,8 @@ impl RgmrApp {
                     );
                 } else {
                     let row_width = ui.available_width();
-                    let button_width = 148.0;
-                    let combo_width = (row_width - button_width - 10.0).max(120.0);
+                    let button_width = MODEL_REFRESH_BUTTON_WIDTH;
+                    let combo_width = (row_width - button_width - 10.0).max(MODEL_COMBO_MIN_WIDTH);
 
                     ui.allocate_ui_with_layout(
                         egui::vec2(row_width, CONTROL_HEIGHT),
@@ -1005,11 +1016,11 @@ impl RgmrApp {
                             ui.add_enabled_ui(!self.state.model_catalog.is_empty(), |ui| {
                                 ComboBox::from_id_source("rgmr_model_catalog_combo")
                                     .width(combo_width)
-                                    .selected_text(if selected_model.trim().is_empty() {
-                                        self.text(TextKey::ModelLabel).to_owned()
-                                    } else {
-                                        selected_model.clone()
-                                    })
+                                    .selected_text(model_combo_selected_text(
+                                        &selected_model,
+                                        self.text(TextKey::ModelLabel),
+                                        combo_width,
+                                    ))
                                     .show_ui(ui, |ui| {
                                         for model in &self.state.model_catalog {
                                             let entry = if let Some(owner) = &model.owned_by {
@@ -1921,13 +1932,22 @@ fn github_button(
         );
 
         let compact = width < FOOTER_BUTTON_WIDTH;
-        if let Some(texture) = github_mark_texture {
-            let icon_size = if compact { 12.2 } else { 13.0 };
+        let icon_size = if compact { 12.2 } else { 13.0 };
+        let font_id = egui::FontId::proportional(if compact { 12.2 } else { 12.8 });
+        let label_galley = ui
+            .painter()
+            .layout_no_wrap(label.to_owned(), font_id, TEXT_PRIMARY);
+        let label_size = label_galley.size();
+        let has_icon = github_mark_texture.is_some();
+        let content_width = if has_icon {
+            icon_size + GITHUB_BUTTON_ICON_GAP + label_size.x
+        } else {
+            label_size.x
+        };
+        let content_left = rect.center().x - content_width * 0.5;
+        let text_left = if let Some(texture) = github_mark_texture {
             let icon_rect = Rect::from_center_size(
-                egui::pos2(
-                    rect.left() + if compact { 15.2 } else { 16.2 },
-                    rect.center().y,
-                ),
+                egui::pos2(content_left + icon_size * 0.5, rect.center().y),
                 egui::vec2(icon_size, icon_size),
             );
             ui.painter().image(
@@ -1936,23 +1956,14 @@ fn github_button(
                 Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
-        }
+            content_left + icon_size + GITHUB_BUTTON_ICON_GAP
+        } else {
+            content_left
+        };
 
-        ui.painter().text(
-            egui::pos2(
-                rect.left()
-                    + if github_mark_texture.is_some() {
-                        if compact { 28.0 } else { 30.0 }
-                    } else if compact {
-                        14.0
-                    } else {
-                        16.0
-                    },
-                rect.center().y,
-            ),
-            Align2::LEFT_CENTER,
-            label,
-            egui::FontId::proportional(if compact { 12.2 } else { 12.8 }),
+        ui.painter().galley(
+            egui::pos2(text_left, rect.center().y - label_size.y * 0.5),
+            label_galley,
             TEXT_PRIMARY,
         );
     }
@@ -2080,6 +2091,44 @@ fn stable_hint(ui: &mut Ui, text: &str, color: Color32, height: f32) {
     );
 }
 
+fn single_line_text_edit<'a>(value: &'a mut String, hint: &'a str, password: bool) -> TextEdit<'a> {
+    TextEdit::singleline(value)
+        .password(password)
+        .hint_text(hint)
+        .margin(Margin::symmetric(10.0, 8.0))
+        .vertical_align(Align::Center)
+        .desired_width(f32::INFINITY)
+        .min_size(Vec2::new(0.0, CONTROL_HEIGHT))
+}
+
+fn model_combo_selected_text(selected_model: &str, placeholder: &str, combo_width: f32) -> String {
+    let selected_model = selected_model.trim();
+    if selected_model.is_empty() {
+        return placeholder.to_owned();
+    }
+
+    let max_chars = (((combo_width - MODEL_COMBO_TEXT_CHROME).max(0.0))
+        / MODEL_COMBO_APPROX_CHAR_WIDTH)
+        .floor() as usize;
+    ellipsize_middle(selected_model, max_chars.max(MODEL_COMBO_MIN_VISIBLE_CHARS))
+}
+
+fn ellipsize_middle(value: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= max_chars {
+        return value.to_owned();
+    }
+    if max_chars <= 1 {
+        return "…".to_owned();
+    }
+
+    let leading = (max_chars - 1).div_ceil(2);
+    let trailing = max_chars - 1 - leading;
+    let prefix: String = chars.iter().take(leading).collect();
+    let suffix: String = chars[chars.len().saturating_sub(trailing)..].iter().collect();
+    format!("{prefix}…{suffix}")
+}
+
 fn labeled_text_input(
     ui: &mut Ui,
     label: &str,
@@ -2096,10 +2145,8 @@ fn labeled_text_input(
         ui.horizontal(|ui| {
             let field_width = (ui.available_width() - 86.0).max(120.0);
             let response = ui.add_sized(
-                [field_width, 38.0],
-                TextEdit::singleline(value)
-                    .password(secret && !*show_secret)
-                    .hint_text(hint),
+                [field_width, CONTROL_HEIGHT],
+                single_line_text_edit(value, hint, secret && !*show_secret),
             );
             changed = response.changed();
             if ui
@@ -2116,10 +2163,8 @@ fn labeled_text_input(
         changed
     } else {
         ui.add_sized(
-            [ui.available_width(), 38.0],
-            TextEdit::singleline(value)
-                .password(secret && !*show_secret)
-                .hint_text(hint),
+            [ui.available_width(), CONTROL_HEIGHT],
+            single_line_text_edit(value, hint, secret && !*show_secret),
         )
         .changed()
     }

@@ -3232,6 +3232,7 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "base64",
+ "clipboard-win",
  "directories",
  "eframe",
  "embed-resource",

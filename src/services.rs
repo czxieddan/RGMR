@@ -11,8 +11,10 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use arboard::Clipboard;
+use arboard::{Clipboard, Error as ArboardError};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+#[cfg(target_os = "windows")]
+use clipboard_win::{Getter, formats, raw};
 use directories::BaseDirs;
 use image::{
     DynamicImage, GenericImageView, ImageFormat, codecs::jpeg::JpegEncoder, imageops::FilterType,
@@ -32,6 +34,8 @@ const APP_NAME: &str = "RGMR";
 const MAX_IMAGE_EDGE: u32 = 1600;
 const CLIPBOARD_MAX_WIDTH: u32 = 1080;
 const CLIPBOARD_JPEG_QUALITY: u8 = 88;
+#[cfg(target_os = "windows")]
+const WINDOWS_CLIPBOARD_OPEN_ATTEMPTS: usize = 10;
 const RGMR_USER_AGENT: &str = concat!("RGMR/", env!("CARGO_PKG_VERSION"));
 const MAX_RESPONSE_PREVIEW_CHARS: usize = 220;
 const MAX_DIAGNOSTIC_ITEMS: usize = 4;
@@ -84,11 +88,31 @@ pub struct ImagePipelineService;
 
 impl ImagePipelineService {
     pub fn from_clipboard() -> Result<ImageAsset, AppError> {
+        match Self::try_from_clipboard_arboard() {
+            Ok(asset) => Ok(asset),
+            Err(primary_error) => {
+                #[cfg(target_os = "windows")]
+                {
+                    match try_from_clipboard_windows_fallback() {
+                        Ok(Some(asset)) => return Ok(asset),
+                        Ok(None) => {}
+                        Err(fallback_error) => {
+                            if matches!(primary_error, AppError::ClipboardUnavailable(_)) {
+                                return Err(fallback_error);
+                            }
+                        }
+                    }
+                }
+
+                Err(primary_error)
+            }
+        }
+    }
+
+    fn try_from_clipboard_arboard() -> Result<ImageAsset, AppError> {
         let mut clipboard =
             Clipboard::new().map_err(|err| AppError::ClipboardUnavailable(err.to_string()))?;
-        let image = clipboard
-            .get_image()
-            .map_err(|_| AppError::ClipboardImageMissing)?;
+        let image = clipboard.get_image().map_err(map_arboard_image_error)?;
 
         let width = image.width as u32;
         let height = image.height as u32;
@@ -811,6 +835,169 @@ fn concise_error(error: &AppError) -> String {
         | AppError::Authentication
         | AppError::RateLimited => error.to_string(),
     }
+}
+
+fn map_arboard_image_error(error: ArboardError) -> AppError {
+    match error {
+        ArboardError::ContentNotAvailable => AppError::ClipboardImageMissing,
+        ArboardError::ClipboardNotSupported | ArboardError::ClipboardOccupied => {
+            AppError::ClipboardUnavailable(error.to_string())
+        }
+        ArboardError::ConversionFailure => {
+            AppError::ImageProcessing("Clipboard image conversion failed".to_owned())
+        }
+        ArboardError::Unknown { description } => AppError::ClipboardUnavailable(description),
+        _ => AppError::ClipboardUnavailable(error.to_string()),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn try_from_clipboard_windows_fallback() -> Result<Option<ImageAsset>, AppError> {
+    let _clipboard = clipboard_win::Clipboard::new_attempts(WINDOWS_CLIPBOARD_OPEN_ATTEMPTS)
+        .map_err(|err| AppError::ClipboardUnavailable(err.to_string()))?;
+
+    let mut last_error = None;
+
+    match try_decode_windows_png_clipboard_image() {
+        Ok(Some(image)) => return ImagePipelineService::from_clipboard_image(image).map(Some),
+        Ok(None) => {}
+        Err(err) => last_error = Some(err),
+    }
+
+    match try_decode_windows_dib_clipboard_image() {
+        Ok(Some(image)) => return ImagePipelineService::from_clipboard_image(image).map(Some),
+        Ok(None) => {}
+        Err(err) => last_error = Some(err),
+    }
+
+    match try_decode_windows_bitmap_clipboard_image() {
+        Ok(Some(image)) => return ImagePipelineService::from_clipboard_image(image).map(Some),
+        Ok(None) => {}
+        Err(err) => last_error = Some(err),
+    }
+
+    if let Some(err) = last_error {
+        return Err(err);
+    }
+
+    Ok(None)
+}
+
+#[cfg(target_os = "windows")]
+fn try_decode_windows_png_clipboard_image() -> Result<Option<DynamicImage>, AppError> {
+    let Some(format) = raw::register_format("PNG") else {
+        return Ok(None);
+    };
+    if !raw::is_format_avail(format.get()) {
+        return Ok(None);
+    }
+
+    let mut png_bytes = Vec::new();
+    raw::get_vec(format.get(), &mut png_bytes)
+        .map_err(|err| AppError::ClipboardUnavailable(err.to_string()))?;
+
+    decode_clipboard_image_bytes(&png_bytes, ImageFormat::Png).map(Some)
+}
+
+#[cfg(target_os = "windows")]
+fn try_decode_windows_dib_clipboard_image() -> Result<Option<DynamicImage>, AppError> {
+    if !raw::is_format_avail(formats::CF_DIB) {
+        return Ok(None);
+    }
+
+    let mut dib_bytes = Vec::new();
+    raw::get_vec(formats::CF_DIB, &mut dib_bytes)
+        .map_err(|err| AppError::ClipboardUnavailable(err.to_string()))?;
+
+    let bitmap_bytes = bitmap_file_from_dib(&dib_bytes)?;
+    decode_clipboard_image_bytes(&bitmap_bytes, ImageFormat::Bmp).map(Some)
+}
+
+#[cfg(target_os = "windows")]
+fn try_decode_windows_bitmap_clipboard_image() -> Result<Option<DynamicImage>, AppError> {
+    if !raw::is_format_avail(formats::CF_BITMAP) {
+        return Ok(None);
+    }
+
+    let mut bitmap_bytes = Vec::new();
+    formats::Bitmap
+        .read_clipboard(&mut bitmap_bytes)
+        .map_err(|err| AppError::ClipboardUnavailable(err.to_string()))?;
+
+    decode_clipboard_image_bytes(&bitmap_bytes, ImageFormat::Bmp).map(Some)
+}
+
+#[cfg(target_os = "windows")]
+fn decode_clipboard_image_bytes(
+    image_bytes: &[u8],
+    format: ImageFormat,
+) -> Result<DynamicImage, AppError> {
+    image::load_from_memory_with_format(image_bytes, format)
+        .map_err(|err| AppError::ImageProcessing(err.to_string()))
+}
+
+#[cfg(target_os = "windows")]
+fn bitmap_file_from_dib(dib_bytes: &[u8]) -> Result<Vec<u8>, AppError> {
+    const BITMAPFILEHEADER_SIZE: usize = 14;
+    const BI_BITFIELDS: u32 = 3;
+
+    let header_size = read_u32_le(dib_bytes, 0)? as usize;
+    if header_size < 40 || dib_bytes.len() < header_size {
+        return Err(AppError::ImageProcessing(
+            "Clipboard DIB header is incomplete".to_owned(),
+        ));
+    }
+
+    let bit_count = read_u16_le(dib_bytes, 14)? as usize;
+    let compression = read_u32_le(dib_bytes, 16)?;
+    let colors_used = read_u32_le(dib_bytes, 32)? as usize;
+    let palette_entries = if colors_used > 0 {
+        colors_used
+    } else if bit_count <= 8 {
+        1usize << bit_count
+    } else {
+        0
+    };
+    let bitfield_bytes = if compression == BI_BITFIELDS && header_size == 40 {
+        12
+    } else {
+        0
+    };
+    let pixel_offset = header_size
+        .checked_add(bitfield_bytes)
+        .and_then(|offset| offset.checked_add(palette_entries.saturating_mul(4)))
+        .filter(|offset| *offset < dib_bytes.len())
+        .ok_or_else(|| {
+            AppError::ImageProcessing("Clipboard DIB layout is invalid".to_owned())
+        })?;
+    let file_size = BITMAPFILEHEADER_SIZE
+        .checked_add(dib_bytes.len())
+        .ok_or_else(|| AppError::ImageProcessing("Clipboard image is too large".to_owned()))?;
+
+    let mut bitmap_bytes = Vec::with_capacity(file_size);
+    bitmap_bytes.extend_from_slice(b"BM");
+    bitmap_bytes.extend_from_slice(&(file_size as u32).to_le_bytes());
+    bitmap_bytes.extend_from_slice(&0u16.to_le_bytes());
+    bitmap_bytes.extend_from_slice(&0u16.to_le_bytes());
+    bitmap_bytes.extend_from_slice(&((BITMAPFILEHEADER_SIZE + pixel_offset) as u32).to_le_bytes());
+    bitmap_bytes.extend_from_slice(dib_bytes);
+    Ok(bitmap_bytes)
+}
+
+#[cfg(target_os = "windows")]
+fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, AppError> {
+    let raw = bytes
+        .get(offset..offset + 2)
+        .ok_or_else(|| AppError::ImageProcessing("Clipboard image header is truncated".to_owned()))?;
+    Ok(u16::from_le_bytes([raw[0], raw[1]]))
+}
+
+#[cfg(target_os = "windows")]
+fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, AppError> {
+    let raw = bytes
+        .get(offset..offset + 4)
+        .ok_or_else(|| AppError::ImageProcessing("Clipboard image header is truncated".to_owned()))?;
+    Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
 }
 
 fn resize_clipboard_image(image: DynamicImage) -> DynamicImage {
