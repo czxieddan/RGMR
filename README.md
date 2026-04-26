@@ -1,5 +1,9 @@
 <div align="center">
 
+<p align="center">
+  <img src="https://i.imgur.com/4R1Fttl.png" alt="app" />
+</p>
+
 # RGMR
 
 面向 OpenAI 兼容视觉模型的 AI 地理识图定位桌面应用
