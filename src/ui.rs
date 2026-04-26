@@ -47,17 +47,21 @@ const WINDOW_MARGIN: f32 = 12.0;
 const WINDOW_RADIUS: f32 = 26.0;
 const CARD_RADIUS: f32 = 22.0;
 const CONTROL_RADIUS: f32 = 16.0;
+const WINDOW_SIDE_INSET: f32 = 18.0;
 const TITLE_BAR_HEIGHT: f32 = 72.0;
 const FOOTER_HEIGHT: f32 = 52.0;
 const FOOTER_GAP: f32 = 8.0;
 const FOOTER_BUTTON_WIDTH: f32 = 116.0;
+const FOOTER_BUTTON_COMPACT_WIDTH: f32 = 98.0;
 const FOOTER_BUTTON_HEIGHT: f32 = 30.0;
 const FOOTER_CENTER_WIDTH: f32 = 244.0;
+const FOOTER_CENTER_MIN_WIDTH: f32 = 188.0;
 const FOOTER_SAFE_GAP: f32 = 16.0;
+const FOOTER_COMPACT_BREAKPOINT: f32 = 980.0;
+const FOOTER_LATENCY_BREAKPOINT: f32 = 1260.0;
 const COLUMN_GAP: f32 = 14.0;
 const RESIZE_HANDLE: f32 = 8.0;
 const RESIZE_CORNER: f32 = 22.0;
-const LEFT_COLUMN_OFFSET: f32 = 8.0;
 const CONTROL_HEIGHT: f32 = 40.0;
 const MODEL_HINT_HEIGHT: f32 = 20.0;
 const REQUEST_FEEDBACK_HEIGHT: f32 = 88.0;
@@ -463,18 +467,41 @@ impl RgmrApp {
                                 .max(0.0),
                         ));
 
-                        self.render_title_bar(ui, ctx);
-                        ui.add_space(12.0);
+                        ui.scope(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
 
-                        let body_height = (ui.available_height() - FOOTER_HEIGHT - FOOTER_GAP).max(0.0);
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(ui.available_width(), body_height),
-                            Layout::top_down(Align::Min),
-                            |ui| self.render_workspace(ui, ctx),
-                        );
+                            self.render_title_bar(ui, ctx);
+                            ui.add_space(12.0);
 
-                        ui.add_space(FOOTER_GAP);
-                        self.render_footer(ui);
+                            let content_width =
+                                (ui.available_width() - WINDOW_SIDE_INSET * 2.0).max(0.0);
+                            let body_height =
+                                (ui.available_height() - FOOTER_HEIGHT - FOOTER_GAP).max(0.0);
+
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                ui.add_space(WINDOW_SIDE_INSET);
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(content_width, body_height),
+                                    Layout::top_down(Align::Min),
+                                    |ui| self.render_workspace(ui, ctx),
+                                );
+                                ui.add_space(WINDOW_SIDE_INSET);
+                            });
+
+                            ui.add_space(FOOTER_GAP);
+
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                ui.add_space(WINDOW_SIDE_INSET);
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(content_width, FOOTER_HEIGHT),
+                                    Layout::top_down(Align::Min),
+                                    |ui| self.render_footer(ui),
+                                );
+                                ui.add_space(WINDOW_SIDE_INSET);
+                            });
+                        });
                     });
             });
     }
@@ -614,24 +641,30 @@ impl RgmrApp {
     fn render_wide_layout(&mut self, ui: &mut Ui, ctx: &Context) {
         let total_width = ui.available_width();
         let height = ui.available_height();
-        let effective_width = (total_width - LEFT_COLUMN_OFFSET).max(420.0);
-        let left_width = (effective_width * 0.25).clamp(304.0, 360.0);
-        let right_width = (effective_width * 0.27).clamp(332.0, 400.0);
-        let center_width =
-            (effective_width - left_width - right_width - COLUMN_GAP * 2.0).max(420.0);
+        let left_width = (total_width * 0.25).clamp(304.0, 360.0);
+        let right_width = (total_width * 0.27).clamp(332.0, 400.0);
+        let center_width = total_width - left_width - right_width - COLUMN_GAP * 2.0;
 
-        ui.horizontal_top(|ui| {
-            ui.add_space(LEFT_COLUMN_OFFSET);
-            render_scroll_column(ui, "rgmr_left_column", left_width, height, |ui| {
-                self.render_left_content(ui)
-            });
-            ui.add_space(COLUMN_GAP);
-            render_scroll_column(ui, "rgmr_center_column", center_width, height, |ui| {
-                self.render_canvas(ui, ctx)
-            });
-            ui.add_space(COLUMN_GAP);
-            render_scroll_column(ui, "rgmr_right_column", right_width, height, |ui| {
-                self.render_results_content(ui)
+        if center_width < 420.0 {
+            self.render_split_layout(ui, ctx);
+            return;
+        }
+
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+
+            ui.horizontal_top(|ui| {
+                render_scroll_column(ui, "rgmr_left_column", left_width, height, |ui| {
+                    self.render_left_content(ui)
+                });
+                ui.add_space(COLUMN_GAP);
+                render_scroll_column(ui, "rgmr_center_column", center_width, height, |ui| {
+                    self.render_canvas(ui, ctx)
+                });
+                ui.add_space(COLUMN_GAP);
+                render_scroll_column(ui, "rgmr_right_column", right_width, height, |ui| {
+                    self.render_results_content(ui)
+                });
             });
         });
     }
@@ -639,20 +672,27 @@ impl RgmrApp {
     fn render_split_layout(&mut self, ui: &mut Ui, ctx: &Context) {
         let total_width = ui.available_width();
         let height = ui.available_height();
-        let effective_width = (total_width - LEFT_COLUMN_OFFSET).max(420.0);
-        let left_width = (effective_width * 0.33).clamp(292.0, 360.0);
-        let workspace_width = (effective_width - left_width - COLUMN_GAP).max(420.0);
+        let left_width = (total_width * 0.33).clamp(292.0, 360.0);
+        let workspace_width = total_width - left_width - COLUMN_GAP;
 
-        ui.horizontal_top(|ui| {
-            ui.add_space(LEFT_COLUMN_OFFSET);
-            render_scroll_column(ui, "rgmr_split_left", left_width, height, |ui| {
-                self.render_left_content(ui)
-            });
-            ui.add_space(COLUMN_GAP);
-            render_scroll_column(ui, "rgmr_split_workspace", workspace_width, height, |ui| {
-                self.render_canvas(ui, ctx);
-                ui.add_space(12.0);
-                self.render_results_content(ui);
+        if workspace_width < 420.0 {
+            self.render_stacked_layout(ui, ctx);
+            return;
+        }
+
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+
+            ui.horizontal_top(|ui| {
+                render_scroll_column(ui, "rgmr_split_left", left_width, height, |ui| {
+                    self.render_left_content(ui)
+                });
+                ui.add_space(COLUMN_GAP);
+                render_scroll_column(ui, "rgmr_split_workspace", workspace_width, height, |ui| {
+                    self.render_canvas(ui, ctx);
+                    ui.add_space(12.0);
+                    self.render_results_content(ui);
+                });
             });
         });
     }
@@ -682,11 +722,21 @@ impl RgmrApp {
             .state
             .last_request_latency_ms
             .map(|latency_ms| format!("{} ms", latency_ms));
+        let footer_width = ui.available_width();
+        let compact_button = footer_width < FOOTER_COMPACT_BREAKPOINT;
+        let button_width = if compact_button {
+            FOOTER_BUTTON_COMPACT_WIDTH
+        } else {
+            FOOTER_BUTTON_WIDTH
+        };
+        let show_latency = footer_width >= FOOTER_LATENCY_BREAKPOINT;
 
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), FOOTER_HEIGHT),
             Layout::top_down(Align::Min),
             |ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+
                 UiFrame::none()
                     .fill(BG_WINDOW_TOP)
                     .rounding(bottom_rounding())
@@ -695,27 +745,41 @@ impl RgmrApp {
                         let content_rect = ui.max_rect();
                         let button_rect = Rect::from_min_size(
                             egui::pos2(
-                                content_rect.right() - FOOTER_BUTTON_WIDTH,
+                                content_rect.right() - button_width,
                                 content_rect.center().y - FOOTER_BUTTON_HEIGHT * 0.5,
                             ),
-                            egui::vec2(FOOTER_BUTTON_WIDTH, FOOTER_BUTTON_HEIGHT),
+                            egui::vec2(button_width, FOOTER_BUTTON_HEIGHT),
                         );
-                        let center_width = content_rect.width().min(FOOTER_CENTER_WIDTH);
-                        let center_left = (content_rect.center().x - center_width * 0.5)
-                            .max(content_rect.left());
-                        let center_right = (center_left + center_width)
-                            .min(button_rect.left() - FOOTER_SAFE_GAP)
-                            .max(center_left);
+                        let center_limit =
+                            (button_rect.left() - content_rect.left() - FOOTER_SAFE_GAP * 2.0)
+                                .max(0.0);
+                        let center_width = if center_limit >= FOOTER_CENTER_MIN_WIDTH {
+                            FOOTER_CENTER_WIDTH
+                                .min(center_limit)
+                                .max(FOOTER_CENTER_MIN_WIDTH)
+                        } else {
+                            center_limit
+                        };
+                        let max_center_left =
+                            (button_rect.left() - FOOTER_SAFE_GAP - center_width)
+                                .max(content_rect.left());
+                        let center_left =
+                            (content_rect.center().x - center_width * 0.5)
+                                .clamp(content_rect.left(), max_center_left);
+                        let center_rect = Rect::from_min_size(
+                            egui::pos2(center_left, content_rect.top()),
+                            egui::vec2(center_width, content_rect.height()),
+                        );
                         let left_rect = Rect::from_min_max(
                             content_rect.min,
                             egui::pos2(
-                                (center_left - FOOTER_SAFE_GAP).max(content_rect.left()),
+                                (center_rect.left() - FOOTER_SAFE_GAP).max(content_rect.left()),
                                 content_rect.max.y,
                             ),
                         );
-                        let show_latency = content_rect.width() >= 1120.0;
 
                         ui.allocate_ui_at_rect(left_rect, |ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
                             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                                 footer_chip(
                                     ui,
@@ -734,16 +798,23 @@ impl RgmrApp {
                             });
                         });
 
-                        ui.painter().text(
-                            egui::pos2((center_left + center_right) * 0.5, content_rect.center().y),
-                            Align2::CENTER_CENTER,
-                            COPYRIGHT_TEXT,
-                            egui::FontId::proportional(11.5),
-                            TEXT_DIM,
-                        );
+                        if center_rect.width() > 0.0 {
+                            ui.allocate_ui_at_rect(center_rect, |ui| {
+                                ui.with_layout(
+                                    Layout::centered_and_justified(egui::Direction::LeftToRight),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(COPYRIGHT_TEXT)
+                                                .size(if compact_button { 11.0 } else { 11.5 })
+                                                .color(TEXT_DIM),
+                                        );
+                                    },
+                                );
+                            });
+                        }
 
                         ui.allocate_ui_at_rect(button_rect, |ui| {
-                            let response = github_button(ui, "GitHub")
+                            let response = github_button(ui, "GitHub", button_width)
                                 .on_hover_text(self.text(TextKey::FooterGithubTooltip));
                             if response.clicked() {
                                 self.open_repository();
@@ -1797,11 +1868,9 @@ fn footer_chip(ui: &mut Ui, label: &str, value: &str) {
         });
 }
 
-fn github_button(ui: &mut Ui, label: &str) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(FOOTER_BUTTON_WIDTH, FOOTER_BUTTON_HEIGHT),
-        Sense::click(),
-    );
+fn github_button(ui: &mut Ui, label: &str, width: f32) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, FOOTER_BUTTON_HEIGHT), Sense::click());
 
     if response.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
@@ -1827,58 +1896,88 @@ fn github_button(ui: &mut Ui, label: &str) -> egui::Response {
             Stroke::new(if response.hovered() { 1.1 } else { 1.0 }, stroke),
         );
 
-        let icon_center = egui::pos2(rect.left() + 18.0, rect.center().y + 0.4);
+        let compact = width < FOOTER_BUTTON_WIDTH;
+        let icon_center = egui::pos2(
+            rect.left() + if compact { 15.2 } else { 16.2 },
+            rect.center().y + 0.25,
+        );
         let icon_color = TEXT_PRIMARY;
-        ui.painter()
-            .circle_stroke(icon_center, 6.8, Stroke::new(1.2, icon_color));
-        ui.painter().line_segment(
-            [
-                egui::pos2(icon_center.x - 4.0, icon_center.y - 5.2),
-                egui::pos2(icon_center.x - 1.4, icon_center.y - 9.2),
-            ],
-            Stroke::new(1.2, icon_color),
-        );
-        ui.painter().line_segment(
-            [
-                egui::pos2(icon_center.x + 4.0, icon_center.y - 5.2),
-                egui::pos2(icon_center.x + 1.4, icon_center.y - 9.2),
-            ],
-            Stroke::new(1.2, icon_color),
-        );
-        ui.painter().circle_filled(
-            egui::pos2(icon_center.x - 2.2, icon_center.y - 0.3),
-            0.9,
+        paint_github_mark(
+            ui,
+            icon_center,
+            if compact { 12.2 } else { 13.0 },
             icon_color,
-        );
-        ui.painter().circle_filled(
-            egui::pos2(icon_center.x + 2.2, icon_center.y - 0.3),
-            0.9,
-            icon_color,
-        );
-        ui.painter().line_segment(
-            [
-                egui::pos2(icon_center.x - 2.4, icon_center.y + 3.3),
-                egui::pos2(icon_center.x, icon_center.y + 4.6),
-            ],
-            Stroke::new(1.1, icon_color),
-        );
-        ui.painter().line_segment(
-            [
-                egui::pos2(icon_center.x + 2.4, icon_center.y + 3.3),
-                egui::pos2(icon_center.x, icon_center.y + 4.6),
-            ],
-            Stroke::new(1.1, icon_color),
+            fill,
         );
         ui.painter().text(
-            egui::pos2(rect.left() + 31.0, rect.center().y),
+            egui::pos2(rect.left() + if compact { 28.0 } else { 30.0 }, rect.center().y),
             Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(12.8),
+            egui::FontId::proportional(if compact { 12.2 } else { 12.8 }),
             TEXT_PRIMARY,
         );
     }
 
     response
+}
+
+fn paint_github_mark(ui: &mut Ui, center: egui::Pos2, size: f32, color: Color32, cutout: Color32) {
+    let painter = ui.painter();
+    let head_center = egui::pos2(center.x - size * 0.01, center.y - size * 0.02);
+    let head_radius = size * 0.27;
+
+    painter.circle_filled(head_center, head_radius, color);
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(head_center.x - head_radius * 0.94, head_center.y - head_radius * 0.42),
+            egui::pos2(head_center.x - head_radius * 0.46, head_center.y - head_radius * 1.46),
+            egui::pos2(head_center.x - head_radius * 0.06, head_center.y - head_radius * 0.62),
+        ],
+        color,
+        Stroke::NONE,
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(head_center.x + head_radius * 0.94, head_center.y - head_radius * 0.42),
+            egui::pos2(head_center.x + head_radius * 0.46, head_center.y - head_radius * 1.46),
+            egui::pos2(head_center.x + head_radius * 0.06, head_center.y - head_radius * 0.62),
+        ],
+        color,
+        Stroke::NONE,
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(head_center.x - head_radius * 0.22, head_center.y - head_radius * 0.96),
+            egui::pos2(head_center.x, head_center.y - head_radius * 0.66),
+            egui::pos2(head_center.x + head_radius * 0.22, head_center.y - head_radius * 0.96),
+        ],
+        cutout,
+        Stroke::NONE,
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(head_center.x - head_radius * 1.02, head_center.y + head_radius * 0.56),
+            egui::pos2(head_center.x - head_radius * 0.58, head_center.y + head_radius * 1.28),
+            egui::pos2(head_center.x, head_center.y + head_radius * 0.92),
+            egui::pos2(head_center.x + head_radius * 0.58, head_center.y + head_radius * 1.28),
+            egui::pos2(head_center.x + head_radius * 1.02, head_center.y + head_radius * 0.56),
+            egui::pos2(head_center.x + head_radius * 0.42, head_center.y + head_radius * 1.66),
+            egui::pos2(head_center.x, head_center.y + head_radius * 1.42),
+            egui::pos2(head_center.x - head_radius * 0.42, head_center.y + head_radius * 1.66),
+        ],
+        color,
+        Stroke::NONE,
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(head_center.x + head_radius * 0.54, head_center.y + head_radius * 1.06),
+            egui::pos2(head_center.x + head_radius * 1.48, head_center.y + head_radius * 0.72),
+            egui::pos2(head_center.x + head_radius * 1.28, head_center.y + head_radius * 0.38),
+            egui::pos2(head_center.x + head_radius * 0.44, head_center.y + head_radius * 0.80),
+        ],
+        color,
+        Stroke::NONE,
+    ));
 }
 
 fn field_label(ui: &mut Ui, text: &str) {
