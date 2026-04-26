@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use arboard::Clipboard;
 use eframe::egui::epaint::Shadow;
 use eframe::egui::viewport::ResizeDirection;
 use eframe::egui::{
@@ -67,7 +66,6 @@ const RESIZE_HANDLE: f32 = 8.0;
 const RESIZE_CORNER: f32 = 22.0;
 const CONTROL_HEIGHT: f32 = 40.0;
 const MODEL_HINT_HEIGHT: f32 = 20.0;
-const REQUEST_FEEDBACK_HEIGHT: f32 = 88.0;
 const WINDOW_CONTENT_INSET: f32 = 2.0;
 const LEFT_COLUMN_WIDE_WIDTH: f32 = 332.0;
 const LEFT_COLUMN_SPLIT_WIDTH: f32 = 332.0;
@@ -118,7 +116,6 @@ pub struct RgmrApp {
     analysis_rx: Receiver<AnalysisWorkerMessage>,
     model_tx: Sender<ModelCatalogMessage>,
     model_rx: Receiver<ModelCatalogMessage>,
-    show_raw_output: bool,
     active_analysis_request_id: Option<String>,
     github_mark_texture: Option<egui::TextureHandle>,
     global_paste_monitor: Option<GlobalPasteMonitor>,
@@ -153,7 +150,6 @@ impl RgmrApp {
             analysis_rx,
             model_tx,
             model_rx,
-            show_raw_output: false,
             active_analysis_request_id: None,
             github_mark_texture,
             global_paste_monitor,
@@ -459,16 +455,6 @@ impl RgmrApp {
                 }
             },
             None => self.state.save_error(AppError::ConfigDirectoryUnavailable),
-        }
-    }
-
-    fn copy_text(&mut self, text: String, success_message: &'static str) {
-        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text)) {
-            Ok(()) => self.state.push_toast(ToastTone::Success, success_message),
-            Err(err) => self.state.push_toast(
-                ToastTone::Danger,
-                format!("{}{}", self.text(TextKey::ToastCopyFailedPrefix), err),
-            ),
         }
     }
 
@@ -1366,25 +1352,18 @@ impl RgmrApp {
                         }
                     });
 
-                ui.add_space(14.0);
+                let show_feedback = self.state.error.is_some()
+                    || (self.state.image.is_some() && !validation.is_valid());
+                if show_feedback {
+                    ui.add_space(14.0);
 
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), REQUEST_FEEDBACK_HEIGHT),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        if let Some(error) = self.state.error.clone() {
-                            let message = i18n::error_message(language, &error);
-                            error_card(ui, i18n::error_title(language, &error), &message);
-                        } else if self.state.request_phase.is_loading() {
-                            loading_strip(
-                                ui,
-                                i18n::request_phase_label(language, &self.state.request_phase),
-                            );
-                        } else if self.state.image.is_some() && !validation.is_valid() {
-                            notice_strip(ui, self.text(TextKey::ConfigIncomplete), WARNING);
-                        }
-                    },
-                );
+                    if let Some(error) = self.state.error.clone() {
+                        let message = i18n::error_message(language, &error);
+                        error_card(ui, i18n::error_title(language, &error), &message);
+                    } else if self.state.image.is_some() && !validation.is_valid() {
+                        notice_strip(ui, self.text(TextKey::ConfigIncomplete), WARNING);
+                    }
+                }
 
                 let cta_label = if self.state.request_phase.is_loading() {
                     self.text(TextKey::Analyzing)
@@ -1455,205 +1434,82 @@ impl RgmrApp {
     }
 
     fn render_results_content(&mut self, ui: &mut Ui) {
+        stretch_width(ui);
+
         let language = self.lang();
-        let parsed_result = self.state.parsed_result.clone();
-        let raw_output = self.state.raw_output.clone();
-        let not_extracted = self.text(TextKey::NotExtracted);
-
-        if parsed_result.is_none() && raw_output.trim().is_empty() {
+        let Some(parsed) = self.state.parsed_result.clone() else {
             return;
-        }
+        };
+        let not_extracted = self.text(TextKey::NotExtracted);
+        let parse_tone = parse_status_color(&parsed.parse_status);
 
-        if let Some(parsed) = parsed_result.clone() {
-            card_panel(
-                ui,
-                parse_status_color(&parsed.parse_status),
-                self.text(TextKey::StructuredResult),
-                i18n::parse_status_hint(language, &parsed.parse_status),
-                |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        status_badge(
-                            ui,
-                            i18n::parse_status_label(language, &parsed.parse_status),
-                            parse_status_color(&parsed.parse_status),
-                        );
-                        if let Some(line) = parsed.structured_line() {
-                            status_badge(ui, &line, ACCENT_MUTED);
-                        }
-                    });
-                    ui.add_space(12.0);
-                    result_card(
-                        ui,
-                        self.text(TextKey::ResultCountry),
-                        parsed.continent_country.as_deref(),
-                        not_extracted,
-                        ACCENT_PRIMARY,
-                    );
+        card_panel(
+            ui,
+            parse_tone,
+            self.text(TextKey::StructuredResult),
+            i18n::parse_status_hint(language, &parsed.parse_status),
+            |ui| {
+                result_card(
+                    ui,
+                    self.text(TextKey::ResultCountry),
+                    parsed.continent_country.as_deref(),
+                    not_extracted,
+                    ACCENT_PRIMARY,
+                );
+                ui.add_space(8.0);
+                result_card(
+                    ui,
+                    self.text(TextKey::ResultDomestic),
+                    parsed.domestic_region.as_deref(),
+                    not_extracted,
+                    ACCENT_SECONDARY,
+                );
+                ui.add_space(8.0);
+                result_card(
+                    ui,
+                    self.text(TextKey::ResultCity),
+                    parsed.city_region.as_deref(),
+                    not_extracted,
+                    ACCENT_MUTED,
+                );
+                ui.add_space(8.0);
+                result_card(
+                    ui,
+                    self.text(TextKey::ResultPlace),
+                    parsed.place_detail.as_deref(),
+                    not_extracted,
+                    WARNING,
+                );
+            },
+        );
+
+        ui.add_space(12.0);
+        card_panel(
+            ui,
+            parse_tone,
+            self.text(TextKey::ConfidencePanel),
+            self.text(TextKey::ConfidencePanelSub),
+            |ui| {
+                supporting_note_panel(
+                    ui,
+                    i18n::parse_status_hint(language, &parsed.parse_status),
+                    parse_tone,
+                    true,
+                );
+
+                if let Some(note) = parsed.confidence_note.as_deref() {
+                    let confidence_text =
+                        format!("{}: {}", i18n::confidence_prefix(language), note.trim());
                     ui.add_space(8.0);
-                    result_card(
-                        ui,
-                        self.text(TextKey::ResultDomestic),
-                        parsed.domestic_region.as_deref(),
-                        not_extracted,
-                        ACCENT_SECONDARY,
-                    );
+                    supporting_note_panel(ui, &confidence_text, ACCENT_MUTED, false);
+                }
+
+                if parsed.parse_status == ParseStatus::Fallback {
                     ui.add_space(8.0);
-                    result_card(
-                        ui,
-                        self.text(TextKey::ResultCity),
-                        parsed.city_region.as_deref(),
-                        not_extracted,
-                        ACCENT_MUTED,
-                    );
-                    ui.add_space(8.0);
-                    result_card(
-                        ui,
-                        self.text(TextKey::ResultPlace),
-                        parsed.place_detail.as_deref(),
-                        not_extracted,
-                        WARNING,
-                    );
-                },
-            );
-
-            ui.add_space(12.0);
-            card_panel(
-                ui,
-                ACCENT_SECONDARY,
-                self.text(TextKey::CopyActions),
-                self.text(TextKey::RawOutputSub),
-                |ui| {
-                    let structured_text = parsed.structured_line();
-                    let full_text =
-                        parsed.full_copy_text(&raw_output, i18n::confidence_prefix(language));
-
-                    ui.horizontal_wrapped(|ui| {
-                        if ui
-                            .add_enabled(
-                                structured_text.is_some(),
-                                action_button(
-                                    self.text(TextKey::CopyStructured),
-                                    ACCENT_SECONDARY,
-                                    false,
-                                ),
-                            )
-                            .clicked()
-                        {
-                            if let Some(text) = structured_text {
-                                self.copy_text(text, self.text(TextKey::ToastCopiedStructured));
-                            }
-                        }
-
-                        if ui
-                            .add(action_button(
-                                self.text(TextKey::CopyFull),
-                                ACCENT_PRIMARY,
-                                false,
-                            ))
-                            .clicked()
-                        {
-                            self.copy_text(full_text, self.text(TextKey::ToastCopiedFull));
-                        }
-
-                        if !raw_output.trim().is_empty()
-                            && ui
-                                .add(action_button(
-                                    self.text(TextKey::CopyRaw),
-                                    ACCENT_MUTED,
-                                    false,
-                                ))
-                                .clicked()
-                        {
-                            self.copy_text(
-                                raw_output.trim().to_owned(),
-                                self.text(TextKey::ToastCopiedRaw),
-                            );
-                        }
-                    });
-                },
-            );
-
-            ui.add_space(12.0);
-            card_panel(
-                ui,
-                parse_status_color(&parsed.parse_status),
-                self.text(TextKey::ConfidencePanel),
-                self.text(TextKey::ConfidencePanelSub),
-                |ui| {
-                    status_badge(
-                        ui,
-                        i18n::parse_status_hint(language, &parsed.parse_status),
-                        parse_status_color(&parsed.parse_status),
-                    );
-                    if let Some(note) = parsed.confidence_note.as_deref() {
-                        ui.add_space(10.0);
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(ui.available_width(), 20.0),
-                            Layout::right_to_left(Align::Center),
-                            |ui| {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{}: {}",
-                                        i18n::confidence_prefix(language),
-                                        note
-                                    ))
-                                    .size(12.5)
-                                    .color(TEXT_SECONDARY),
-                                );
-                            },
-                        );
-                    }
-                    if parsed.parse_status == ParseStatus::Fallback {
-                        ui.add_space(8.0);
-                        small_hint(ui, self.text(TextKey::ReviewHint), WARNING);
-                    }
-                },
-            );
-        }
-
-        if !raw_output.trim().is_empty() {
-            ui.add_space(12.0);
-            card_panel(
-                ui,
-                ACCENT_PRIMARY,
-                self.text(TextKey::RawOutput),
-                self.text(TextKey::RawOutputSub),
-                |ui| {
-                    let toggle_label = if self.show_raw_output {
-                        self.text(TextKey::CollapseRawOutput)
-                    } else {
-                        self.text(TextKey::ExpandRawOutput)
-                    };
-                    if ui
-                        .add(action_button(toggle_label, ACCENT_PRIMARY, false))
-                        .clicked()
-                    {
-                        self.show_raw_output = !self.show_raw_output;
-                    }
-                    if self.show_raw_output {
-                        ui.add_space(10.0);
-                        UiFrame::none()
-                            .fill(BG_INPUT)
-                            .stroke(Stroke::new(1.0, BORDER_STRONG))
-                            .rounding(Rounding::same(18.0))
-                            .inner_margin(Margin::same(14.0))
-                            .show(ui, |ui| {
-                                ScrollArea::vertical()
-                                    .max_height(240.0)
-                                    .auto_shrink([false, false])
-                                    .show(ui, |ui| {
-                                        ui.label(
-                                            RichText::new(raw_output.trim())
-                                                .size(12.5)
-                                                .monospace()
-                                                .color(TEXT_PRIMARY),
-                                        );
-                                    });
-                            });
-                    }
-                },
-            );
-        }
+                    supporting_note_panel(ui, self.text(TextKey::ReviewHint), WARNING, false);
+                }
+            },
+        );
     }
 
     fn render_resize_handles(&self, ctx: &Context) {
@@ -1934,6 +1790,13 @@ fn resize_handle(
         });
 }
 
+fn stretch_width(ui: &mut Ui) {
+    let width = ui.available_width().max(0.0);
+    ui.set_min_width(width);
+    ui.set_width(width);
+    ui.set_max_width(width);
+}
+
 fn card_panel(
     ui: &mut Ui,
     accent: Color32,
@@ -1941,25 +1804,32 @@ fn card_panel(
     subtitle: &str,
     add_contents: impl FnOnce(&mut Ui),
 ) {
-    UiFrame::none()
-        .fill(BG_SURFACE)
-        .stroke(Stroke::new(1.0, BORDER))
-        .rounding(Rounding::same(CARD_RADIUS))
-        .inner_margin(Margin::same(18.0))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let (strip_rect, _) = ui.allocate_exact_size(egui::vec2(4.0, 34.0), Sense::hover());
-                ui.painter()
-                    .rect_filled(strip_rect, Rounding::same(4.0), accent);
-                ui.add_space(8.0);
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(title).size(17.0).color(TEXT_PRIMARY).strong());
-                    ui.label(RichText::new(subtitle).size(12.0).color(TEXT_DIM));
+    ui.scope(|ui| {
+        stretch_width(ui);
+
+        UiFrame::none()
+            .fill(BG_SURFACE)
+            .stroke(Stroke::new(1.0, BORDER))
+            .rounding(Rounding::same(CARD_RADIUS))
+            .inner_margin(Margin::same(18.0))
+            .show(ui, |ui| {
+                stretch_width(ui);
+
+                ui.horizontal(|ui| {
+                    let (strip_rect, _) =
+                        ui.allocate_exact_size(egui::vec2(4.0, 34.0), Sense::hover());
+                    ui.painter()
+                        .rect_filled(strip_rect, Rounding::same(4.0), accent);
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(title).size(17.0).color(TEXT_PRIMARY).strong());
+                        ui.label(RichText::new(subtitle).size(12.0).color(TEXT_DIM));
+                    });
                 });
+                ui.add_space(14.0);
+                add_contents(ui);
             });
-            ui.add_space(14.0);
-            add_contents(ui);
-        });
+    });
 }
 
 fn footer_chip(ui: &mut Ui, label: &str, value: &str) {
@@ -2082,45 +1952,58 @@ fn field_label(ui: &mut Ui, text: &str) {
 }
 
 fn result_card(ui: &mut Ui, label: &str, value: Option<&str>, empty_label: &str, accent: Color32) {
-    UiFrame::none()
-        .fill(BG_INPUT)
-        .stroke(Stroke::new(1.0, accent.linear_multiply(0.8)))
-        .rounding(Rounding::same(18.0))
-        .inner_margin(Margin::same(16.0))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(label)
-                    .size(11.5)
-                    .color(TEXT_SECONDARY)
-                    .strong(),
-            );
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new(value.unwrap_or(empty_label))
-                    .size(17.0)
-                    .color(if value.is_some() {
-                        TEXT_PRIMARY
-                    } else {
-                        TEXT_DIM
-                    })
-                    .strong(),
-            );
-        });
+    ui.scope(|ui| {
+        stretch_width(ui);
+
+        UiFrame::none()
+            .fill(BG_INPUT)
+            .stroke(Stroke::new(1.0, accent.linear_multiply(0.8)))
+            .rounding(Rounding::same(18.0))
+            .inner_margin(Margin::same(16.0))
+            .show(ui, |ui| {
+                stretch_width(ui);
+
+                ui.label(
+                    RichText::new(label)
+                        .size(11.5)
+                        .color(TEXT_SECONDARY)
+                        .strong(),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(value.unwrap_or(empty_label))
+                        .size(17.0)
+                        .color(if value.is_some() {
+                            TEXT_PRIMARY
+                        } else {
+                            TEXT_DIM
+                        })
+                        .strong(),
+                );
+            });
+    });
 }
 
-fn loading_strip(ui: &mut Ui, text: &str) {
-    UiFrame::none()
-        .fill(BG_INPUT)
-        .stroke(Stroke::new(1.0, BORDER_STRONG))
-        .rounding(Rounding::same(16.0))
-        .inner_margin(Margin::symmetric(12.0, 10.0))
-        .show(ui, |ui| {
-            ui.horizontal_centered(|ui| {
-                ui.add(egui::Spinner::new().size(16.0).color(ACCENT_SECONDARY));
-                ui.add_space(8.0);
-                ui.label(RichText::new(text).size(12.5).color(TEXT_PRIMARY));
+fn supporting_note_panel(ui: &mut Ui, text: &str, tone: Color32, strong: bool) {
+    ui.scope(|ui| {
+        stretch_width(ui);
+
+        UiFrame::none()
+            .fill(BG_INPUT)
+            .stroke(Stroke::new(1.0, tone.linear_multiply(0.7)))
+            .rounding(Rounding::same(16.0))
+            .inner_margin(Margin::same(14.0))
+            .show(ui, |ui| {
+                stretch_width(ui);
+
+                let text = if strong {
+                    RichText::new(text).size(12.8).color(TEXT_PRIMARY).strong()
+                } else {
+                    RichText::new(text).size(12.5).color(TEXT_SECONDARY)
+                };
+                ui.label(text);
             });
-        });
+    });
 }
 
 fn notice_strip(ui: &mut Ui, text: &str, tone: Color32) {
