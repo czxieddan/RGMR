@@ -1124,16 +1124,75 @@ impl RgmrApp {
                 ui.add_space(10.0);
                 field_label(ui, self.text(TextKey::RequestTimeoutLabel));
                 let seconds_label = self.text(TextKey::SecondsLabel);
-                if ui
-                    .add_sized(
-                        [ui.available_width(), CONTROL_HEIGHT],
-                        egui::Slider::new(&mut self.state.config.api.timeout_sec, 10..=180)
-                            .text(seconds_label)
-                            .show_value(true),
-                    )
-                    .changed()
-                {
-                    self.state.mark_config_dirty();
+                let row_width = ui.available_width();
+                let value_width = 56.0;
+                let unit_width = 20.0;
+
+                if row_width < 260.0 {
+                    let slider_changed = ui
+                        .add_sized(
+                            [row_width, CONTROL_HEIGHT],
+                            egui::Slider::new(&mut self.state.config.api.timeout_sec, 10..=180)
+                                .show_value(false)
+                                .trailing_fill(true),
+                        )
+                        .changed();
+
+                    ui.add_space(8.0);
+                    let mut value_changed = false;
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new(seconds_label).color(TEXT_SECONDARY));
+                        value_changed = ui
+                            .add_sized(
+                                [value_width, CONTROL_HEIGHT],
+                                egui::DragValue::new(&mut self.state.config.api.timeout_sec)
+                                    .clamp_range(10..=180)
+                                    .speed(0.2),
+                            )
+                            .changed();
+                    });
+
+                    if slider_changed || value_changed {
+                        self.state.mark_config_dirty();
+                    }
+                } else {
+                    let mut slider_changed = false;
+                    let mut value_changed = false;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(row_width, CONTROL_HEIGHT),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            let slider_width =
+                                (row_width - value_width - unit_width - 12.0).max(120.0);
+                            slider_changed = ui
+                                .add_sized(
+                                    [slider_width, CONTROL_HEIGHT],
+                                    egui::Slider::new(
+                                        &mut self.state.config.api.timeout_sec,
+                                        10..=180,
+                                    )
+                                    .show_value(false)
+                                    .trailing_fill(true),
+                                )
+                                .changed();
+
+                            ui.add_space(8.0);
+                            value_changed = ui
+                                .add_sized(
+                                    [value_width, CONTROL_HEIGHT],
+                                    egui::DragValue::new(&mut self.state.config.api.timeout_sec)
+                                        .clamp_range(10..=180)
+                                        .speed(0.2),
+                                )
+                                .changed();
+                            ui.add_space(4.0);
+                            ui.label(RichText::new(seconds_label).color(TEXT_SECONDARY));
+                        },
+                    );
+
+                    if slider_changed || value_changed {
+                        self.state.mark_config_dirty();
+                    }
                 }
             },
         );

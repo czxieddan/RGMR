@@ -292,6 +292,24 @@ impl ImagePipelineService {
     }
 
     fn from_clipboard_image(image: DynamicImage) -> Result<ImageAsset, AppError> {
+        Self::from_clipboard_image_named(image, None)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn from_clipboard_file(path: &Path) -> Result<ImageAsset, AppError> {
+        let bytes = fs::read(path).map_err(|err| AppError::UnsupportedImage(err.to_string()))?;
+        let image = image::load_from_memory(&bytes)
+            .map_err(|err| AppError::ImageProcessing(err.to_string()))?;
+        let original_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string());
+        Self::from_clipboard_image_named(image, original_name)
+    }
+
+    fn from_clipboard_image_named(
+        image: DynamicImage,
+        original_name: Option<String>,
+    ) -> Result<ImageAsset, AppError> {
         let resized = resize_clipboard_image(image);
         let rgba = resized.to_rgba8();
         let (width, height) = resized.dimensions();
@@ -317,7 +335,7 @@ impl ImagePipelineService {
 
         Ok(ImageAsset {
             source_kind: ImageSourceKind::Clipboard,
-            original_name: None,
+            original_name,
             mime_type,
             width,
             height,
@@ -1086,6 +1104,12 @@ fn try_from_clipboard_windows_native() -> Result<Option<ImageAsset>, AppError> {
         Err(err) => last_error = Some(err),
     }
 
+    match try_from_clipboard_file_list_image() {
+        Ok(Some(asset)) => return Ok(Some(asset)),
+        Ok(None) => {}
+        Err(err) => last_error = Some(err),
+    }
+
     if let Some(err) = last_error {
         return Err(err);
     }
@@ -1147,6 +1171,32 @@ fn try_decode_windows_bitmap_clipboard_image() -> Result<Option<DynamicImage>, A
         .map_err(|err| AppError::ClipboardUnavailable(err.to_string()))?;
 
     decode_clipboard_image_bytes(&bitmap_bytes, ImageFormat::Bmp).map(Some)
+}
+
+#[cfg(target_os = "windows")]
+fn try_from_clipboard_file_list_image() -> Result<Option<ImageAsset>, AppError> {
+    if !raw::is_format_avail(formats::CF_HDROP) {
+        return Ok(None);
+    }
+
+    let mut files = Vec::<PathBuf>::new();
+    formats::FileList
+        .read_clipboard(&mut files)
+        .map_err(|err| AppError::ClipboardUnavailable(err.to_string()))?;
+
+    for path in files {
+        if !looks_like_supported_image_path(&path) {
+            continue;
+        }
+
+        match ImagePipelineService::from_clipboard_file(&path) {
+            Ok(asset) => return Ok(Some(asset)),
+            Err(AppError::UnsupportedImage(_) | AppError::ImageProcessing(_)) => continue,
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(None)
 }
 
 #[cfg(target_os = "windows")]
@@ -1258,6 +1308,17 @@ fn resize_if_needed(image: DynamicImage) -> DynamicImage {
     let new_width = ((width as f32) * scale).round().max(1.0) as u32;
     let new_height = ((height as f32) * scale).round().max(1.0) as u32;
     image.resize(new_width, new_height, FilterType::Lanczos3)
+}
+
+fn looks_like_supported_image_path(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "ico"
+    )
 }
 
 fn guess_mime_type(path: &Path) -> String {
